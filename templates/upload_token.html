@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Token</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h1>Upload Access Token</h1>
+    <p>Please upload your JSON file containing the access token to proceed.</p>
+    
+    <button onclick="loadJSONFile()">Upload JSON File</button>
+
+    <script>
+        // JavaScript function to handle JSON file upload
+        function loadJSONFile() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const text = await file.text();
+                    try {
+                        const jsonData = JSON.parse(text);
+                        console.log('JSON loaded:', jsonData);
+
+                        if (jsonData.access_token) {
+                            console.log('Access Token:', jsonData.access_token);
+
+                            // Send the token to the backend
+                            $.ajax({
+                                url: '/set_access_token',
+                                method: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({ access_token: jsonData.access_token }),
+                                success: function (response) {
+                                    console.log('Access token saved successfully:', response);
+                                    alert('Access token sent to the backend successfully!');
+                                    window.location.href = '/'; // Redirect to homepage
+                                },
+                                error: function (xhr, status, error) {
+                                    console.error('Error saving access token:', error);
+                                    alert('Failed to send access token to the backend. Please try again.');
+                                }
+                            });
+                        } else {
+                            alert('Access token not found in JSON file.');
+                        }
+                    } catch (error) {
+                        console.error('Error parsing JSON:', error);
+                        alert('Invalid JSON file. Please check the file and try again.');
+                    }
+                }
+            };
+
+            input.click();
+        }
+    </script>
+</body>
+</html>
