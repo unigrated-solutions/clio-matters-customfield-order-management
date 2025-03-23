@@ -3,14 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Token</title>
+    <title>Upload or Paste Access Token</title>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-    <h1>Upload Access Token</h1>
-    <p>Please upload your JSON file containing the access token to proceed.</p>
-    
+    <h1>Upload or Paste Access Token</h1>
+    <p>Upload a JSON file containing the access token or manually paste it below.</p>
+
     <button onclick="loadJSONFile()">Upload JSON File</button>
+    
+    <br><br>
+
+    <label for="tokenInput">Paste Access Token:</label>
+    <input type="text" id="tokenInput" placeholder="Paste your access token here" style="width: 300px;">
+    <button onclick="submitAccessToken()">Submit</button>
 
     <script>
         // JavaScript function to handle JSON file upload
@@ -29,23 +35,9 @@
 
                         if (jsonData.access_token) {
                             console.log('Access Token:', jsonData.access_token);
-
-                            // Send the token to the backend
-                            $.ajax({
-                                url: '/set_access_token',
-                                method: 'POST',
-                                contentType: 'application/json',
-                                data: JSON.stringify({ access_token: jsonData.access_token }),
-                                success: function (response) {
-                                    console.log('Access token saved successfully:', response);
-                                    alert('Access token sent to the backend successfully!');
-                                    window.location.href = '/'; // Redirect to homepage
-                                },
-                                error: function (xhr, status, error) {
-                                    console.error('Error saving access token:', error);
-                                    alert('Failed to send access token to the backend. Please try again.');
-                                }
-                            });
+                            
+                            // Automatically fill in the text field
+                            document.getElementById('tokenInput').value = jsonData.access_token;
                         } else {
                             alert('Access token not found in JSON file.');
                         }
@@ -57,6 +49,32 @@
             };
 
             input.click();
+        }
+
+        // JavaScript function to submit the access token to the backend
+        function submitAccessToken() {
+            const token = document.getElementById('tokenInput').value.trim();
+            
+            if (!token) {
+                alert('Please enter or upload an access token.');
+                return;
+            }
+
+            $.ajax({
+                url: '/set_access_token',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ access_token: token }),
+                success: function (response) {
+                    console.log('Access token saved successfully:', response);
+                    alert('Access token sent to the backend successfully!');
+                    window.location.href = '/'; // Redirect to homepage
+                },
+                error: function (xhr, status, error) {
+                    console.error('Error saving access token:', error);
+                    alert('Failed to send access token to the backend. Please try again.');
+                }
+            });
         }
     </script>
 </body>
