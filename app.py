@@ -9,38 +9,23 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Sample custom fields data
 app.storage.general['custom_fields'] = [
-    {"name": "Field 1", "display_order": 1},
-    {"name": "Field 2", "display_order": 2},
-    {"name": "Field 3", "display_order": 3},
-    {"name": "Field 4", "display_order": 4},
-    {"name": "Field 5", "display_order": 5},
-    {"name": "Field 6", "display_order": 6},
-    {"name": "Field 7", "display_order": 7},
-    {"name": "Field 8", "display_order": 8},    
-    {"name": "Field 9", "display_order": 9},
-    {"name": "Field 10", "display_order": 10},
-    {"name": "Field 11", "display_order": 11},
-    {"name": "Field 12", "display_order": 12},    
+    {'id':111 , 'deleted': False, "name": "Field 1", "display_order": 1},
+    {'id':222 , 'deleted': False, "name": "Field 2", "display_order": 2},
+    {'id':333 , 'deleted': False, "name": "Field 3", "display_order": 3},
+    {'id':444 , 'deleted': False, "name": "Field 4", "display_order": 4},
+    {'id':555 , 'deleted': False, "name": "Field 5", "display_order": 5},
+    {'id':666 , 'deleted': False, "name": "Field 6", "display_order": 6},
+    {'id':777 , 'deleted': False, "name": "Field 7", "display_order": 7},
+    {'id':888 , 'deleted': False, "name": "Field 8", "display_order": 8},    
+    {'id':999 , 'deleted': True, "name": "Field 9", "display_order": 9},
+    {'id':110 , 'deleted': False, "name": "Field 10", "display_order": 10},
+    {'id':110 , 'deleted': True, "name": "Field 11", "display_order": 11},
+    {'id':120 , 'deleted': False, "name": "Field 12", "display_order": 12},    
 ]
-
-custom_fields = [
-    {"name": "Field 1", "display_order": 1},
-    {"name": "Field 2", "display_order": 2},
-    {"name": "Field 3", "display_order": 3},
-    {"name": "Field 4", "display_order": 4},
-    {"name": "Field 5", "display_order": 5},
-    {"name": "Field 6", "display_order": 6},
-    {"name": "Field 7", "display_order": 7},
-    {"name": "Field 8", "display_order": 8},    
-    {"name": "Field 9", "display_order": 9},
-    {"name": "Field 10", "display_order": 10},
-    {"name": "Field 11", "display_order": 11},
-    {"name": "Field 12", "display_order": 12},    
-]
-
-cards = []
-card_list = None
-event_handler = None
+app.storage.general['custom_field_sets'] = [
+    {"id": 999, "name": "Field Set 1", "custom_fields": [{"id": 111},{"id": 222},{"id": 333},{"id": 444}]},
+    {"id": 888, "name": "Field Set 2", "custom_fields": [{"id": 444},{"id": 555},{"id": 888},{"id": 222},{"id": 999}]}
+    ]
 
 def generate_selection_range(number1, number2):
     """Generates a range excluding both number1 and number2."""
@@ -97,12 +82,13 @@ def calculate_final_positions(custom_fields, moving_ids, target_position):
 
 def move_selected_cards(target_position=5):
     """Gathers selected cards, updates positions, and regenerates UI in new order."""
-    global card_list
     cards = app.storage.tab['cards']
     custom_fields = app.storage.general['custom_fields']
+    
     # Get selected cards
     selected_cards = [card for card in cards if card.selected]
     ui.notify(selected_cards)
+    
     if not selected_cards:
         ui.notify("No cards selected!", color="red")
         return
@@ -116,6 +102,9 @@ def move_selected_cards(target_position=5):
     # **Update the global `custom_fields` with the new order**
     app.storage.general['custom_fields'] = sorted(updated_fields, key=lambda x: x["display_order"])  # Sort by position
     app.storage.tab['card_list'].refresh()
+    for field_set in app.storage.tab['field_set_cards']:
+
+        field_set.reorder_custom_fields.refresh()
 
     # Notify success
     ui.notify(f"Moved {len(selected_cards)} cards to position {target_position}!", color="green")
@@ -196,6 +185,11 @@ class EventHandler:
     def do_nothing(self):
         pass
     
+    def toggle_deleted_field_visibility(self, value):
+        for card in self.custom_field_cards:
+            if card.deleted:
+                card.set_visibility(value)
+            
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
@@ -210,9 +204,14 @@ class CustomFieldCard:
         self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
 
         # Bind name and position dynamically from field data
+        self.id = field_data["id"]
         self.name = field_data["name"]
         self.display_order = field_data["display_order"]  # Ensure position updates dynamically
-
+        self.deleted = field_data["deleted"]
+        
+        if self.deleted:
+            self.name += (": (Deleted)")
+            
         with self.card:
             with ui.context_menu():
                 ui.menu_item("Insert Above", lambda: move_selected_cards(self.display_order - 1))
@@ -260,15 +259,82 @@ class CustomFieldCard:
         self.card.visible = search_text.lower() in self.field_data["name"].lower()
         logging.debug(f"Card '{self.field_data['name']}' visibility: {self.card.visible}")
 
+    def set_visibility(self, value):
+        self.card.visible = value
+        
     def update_position(self, new_position):
         """Update the card's current position dynamically."""
         self.display_order = new_position
-        
+
+class CustomFieldSetCard:
+    def __init__(self, field_set_data):
+        """Initialize the custom field set card with data."""
+        self.field_set_data = field_set_data
+        self.id = field_set_data["id"]
+        self.name = field_set_data["name"]
+        self.custom_fields = field_set_data["custom_fields"]  # [{'id': 111}, {'id': 222}, ...]
+
+        # Lookup full custom field data from global storage
+        all_fields = app.storage.general['custom_fields']
+        custom_field_map = {field["id"]: field for field in all_fields if not field.get('deleted', False)}
+
+        # Filter to get only associated fields, fully populated
+        self.custom_field_data = [
+            custom_field_map[f['id']]
+            for f in self.custom_fields
+            if f['id'] in custom_field_map
+        ]
+
+        # Sort by display_order
+        self.custom_field_data.sort(key=lambda f: f['display_order'])
+
+        # Card Layout
+        self.card = ui.card().classes('w-full justify-center')
+        self.reorder_custom_fields()  # initial layout call
+
+    @ui.refreshable
+    def reorder_custom_fields(self):
+        # 🔄 Re-fetch the latest field info from storage
+        all_fields = app.storage.general['custom_fields']
+        custom_field_map = {
+            field['id']: field
+            for field in all_fields
+            # if not field.get('deleted', False)
+        }
+
+        # Reconstruct custom_field_data from current storage
+        self.custom_field_data = [
+            custom_field_map[f['id']]
+            for f in self.field_set_data['custom_fields']
+            if f['id'] in custom_field_map
+        ]
+
+        # Sort by updated display_order
+        self.custom_field_data.sort(key=lambda f: f['display_order'])
+
+        # 🔄 Clear and regenerate the grid UI
+        self.card.clear()
+        with self.card:
+            # Header label
+            ui.label(self.name).classes('text-xl font-bold w-full text-center')
+
+        with ui.grid(columns=2).classes('w-full gap-3'):
+            for field in self.custom_field_data:
+                label = ui.label(field['name']).classes(
+                    'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
+                ).style(
+                    'display: flex; align-items: center; justify-content: center; height: 100%;'
+                )
+
+                # ✅ Bind visibility only if the field is deleted
+                if field.get('deleted', False):
+                    label.bind_visibility_from(app.storage.tab, 'display_deleted')
+
 @ui.page("/")
 async def main_page():
     await ui.context.client.connected()
     app.storage.tab['cards'] = []
-    global event_handler
+    app.storage.tab['field_set_cards'] = []
     event_handler = EventHandler()
 
     # A container to hold the column of cards
@@ -285,6 +351,7 @@ async def main_page():
     @ui.refreshable
     def generate_custom_field_cards() -> None:
         ui.notify("Refreshing cards")
+        custom_field_cards = app.storage.tab['cards']
         nonlocal card_column
         
         app.storage.tab['cards'].clear()
@@ -293,26 +360,26 @@ async def main_page():
         with card_column:
             with ui.column().classes('w-full').style('gap: 7px;'):
                 for field in app.storage.general['custom_fields']:
-                    app.storage.tab['cards'].append(CustomFieldCard(field, event_handler))
+                    custom_field_cards.append(CustomFieldCard(field, event_handler))
                     
                     # cards.append(card_instance)
-                event_handler.set_custom_field_cards(cards)
+                event_handler.set_custom_field_cards(custom_field_cards)
     
     with ui.header(elevated=True).style('background-color: #3874c8; padding: 10px 10px;').classes('items-center justify-between'):
         # Left-aligned title
         ui.label("Custom Field Management").style('font-size: 1.5em; font-weight: bold; color: white;')
 
-        ui.button('Delete Fields', on_click= lambda: app.storage.general['custom_fields'].pop())
-        ui.button('Update Fields', on_click=generate_custom_field_cards.refresh)
+        # ui.button('Delete Fields', on_click= lambda: app.storage.general['custom_fields'].pop())
+        # ui.button('Update Fields', on_click=generate_custom_field_cards.refresh)
 
         access_token = ui.input(
             placeholder="Enter Access Token..."
         ).style(
-            'width: 600px; font-size: 1.5em; border-radius: 5px; '
+            'width: 500px; font-size: 1.5em; border-radius: 5px; '
             'border: 2px solid white; background-color: white; color: #333; '
             'box-sizing: border-box; text-indent: 5px;'
         )
-
+        ui.button('Switch to Contact custom fields', on_click=generate_custom_field_cards.refresh)
     """Main NiceGUI Page with Clickable and Filterable Custom Field Cards."""
     with ui.row().style('width: 100%; height: calc(100vh - 120px); display: flex;') as page_container:
         page_container.on('dblclick', event_handler.deselect_all_cards)
@@ -320,8 +387,9 @@ async def main_page():
         # Scroll Area for Custom Field Sets
         with ui.scroll_area().style('flex: 1; height: 100%; padding: 0; margin: 0;'):
             with ui.column().style('width: 100%; padding: 20px;'):
-                ui.label('Left Side Content')
-
+                for field_set in app.storage.general['custom_field_sets']:
+                    app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
+                    
         with ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;'):
             pass
 
@@ -332,21 +400,24 @@ async def main_page():
             with ui.column().style('width: 100%; background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
                 
                 def filter_fields():
-                    search_text = filter_input.value
+                    search_text = custom_field_filter.value
                     logging.debug(f"Filtering with: {search_text}")
                     for card in app.storage.tab['cards']:
                         card.update_visibility(search_text)  # Update visibility
                     
                 # Input field for filtering
                 with ui.row():
-                    filter_input = ui.input(placeholder="Filter fields by name...", on_change=filter_fields).style(
-                'width: 600px; font-size: 1.5em; border-radius: 5px; '
-                'border: 2px;'
-            )
+                    custom_field_filter = ui.input(placeholder="Filter fields by name...", on_change=filter_fields).style(
+                        'width: 300px; font-size: 1.5em; border-radius: 5px; '
+                        'border: 2px;'
+                    )
+                    toggle_deleted_field = ui.switch("Show Deleted", value=True).bind_value_to(app.storage.tab,'display_deleted')
+                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
 
             # Scroll area for cards
             with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
                 card_column = ui.column().classes('w-full')
                 generate_custom_field_cards()  # Initial render
                 app.storage.tab['card_list'] = generate_custom_field_cards
-ui.run()
+
+ui.run(native=True, title="Matters" , window_size=(1440,810))
