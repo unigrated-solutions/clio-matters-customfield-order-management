@@ -8,6 +8,21 @@ from nicegui.events import KeyEventArguments, ClickEventArguments
 logging.basicConfig(level=logging.DEBUG)
 
 # Sample custom fields data
+app.storage.general['custom_fields'] = [
+    {"name": "Field 1", "display_order": 1},
+    {"name": "Field 2", "display_order": 2},
+    {"name": "Field 3", "display_order": 3},
+    {"name": "Field 4", "display_order": 4},
+    {"name": "Field 5", "display_order": 5},
+    {"name": "Field 6", "display_order": 6},
+    {"name": "Field 7", "display_order": 7},
+    {"name": "Field 8", "display_order": 8},    
+    {"name": "Field 9", "display_order": 9},
+    {"name": "Field 10", "display_order": 10},
+    {"name": "Field 11", "display_order": 11},
+    {"name": "Field 12", "display_order": 12},    
+]
+
 custom_fields = [
     {"name": "Field 1", "display_order": 1},
     {"name": "Field 2", "display_order": 2},
@@ -21,9 +36,8 @@ custom_fields = [
     {"name": "Field 10", "display_order": 10},
     {"name": "Field 11", "display_order": 11},
     {"name": "Field 12", "display_order": 12},    
-    
-
 ]
+
 cards = []
 card_list = None
 event_handler = None
@@ -83,11 +97,12 @@ def calculate_final_positions(custom_fields, moving_ids, target_position):
 
 def move_selected_cards(target_position=5):
     """Gathers selected cards, updates positions, and regenerates UI in new order."""
-    global cards, card_list, custom_fields
-
+    global card_list
+    cards = app.storage.tab['cards']
+    custom_fields = app.storage.general['custom_fields']
     # Get selected cards
     selected_cards = [card for card in cards if card.selected]
-
+    ui.notify(selected_cards)
     if not selected_cards:
         ui.notify("No cards selected!", color="red")
         return
@@ -99,21 +114,8 @@ def move_selected_cards(target_position=5):
     updated_fields = calculate_final_positions(custom_fields, moving_ids, target_position)
 
     # **Update the global `custom_fields` with the new order**
-    custom_fields = sorted(updated_fields, key=lambda x: x["display_order"])  # Sort by position
-
-    # Clear old UI elements
-    card_list.clear()
-    cards.clear()
-
-    # Regenerate UI with updated order
-    with card_list:
-        with ui.column().classes('w-full').style('gap: 7px;'):
-            for field in custom_fields:  # **Using updated sorted custom_fields**
-                card_instance = CustomFieldCard(field, event_handler)
-                cards.append(card_instance)
-
-    # Update event handler with new cards
-    event_handler.set_custom_field_cards(cards)
+    app.storage.general['custom_fields'] = sorted(updated_fields, key=lambda x: x["display_order"])  # Sort by position
+    app.storage.tab['card_list'].refresh()
 
     # Notify success
     ui.notify(f"Moved {len(selected_cards)} cards to position {target_position}!", color="green")
@@ -138,7 +140,7 @@ class EventHandler:
         self.ctrl_down = position
 
     def handle_key(self, e: KeyEventArguments):
-        # print(e)
+        # print(e.key)
         if e.key == 'Shift':
             if e.action.keydown:
                 # ui.notify('Shift Down')
@@ -155,11 +157,8 @@ class EventHandler:
                 self.ctrl_down = False
                 # ui.notify('Control Up')
 
-    def container_click(self, e: ClickEventArguments):
-        # print("Container clicked")
-        if time.time() - self.last_card_click_timestamp > 0.2:  # Increased timeout to prevent quick deselect
+        if e.key == "Escape":
             self.deselect_all_cards()
-            self.last_card_clicked = None
             
     def handle_card_click(self, custom_field_card):
         # ui.notify(custom_field_card)
@@ -193,7 +192,10 @@ class EventHandler:
     def deselect_all_cards(self):
         for card in self.custom_field_cards:
             card.deselect_card()
-            
+    
+    def do_nothing(self):
+        pass
+    
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
@@ -263,13 +265,45 @@ class CustomFieldCard:
         self.display_order = new_position
         
 @ui.page("/")
-def main_page():
-    global cards, card_list, event_handler
+async def main_page():
+    await ui.context.client.connected()
+    app.storage.tab['cards'] = []
+    global event_handler
     event_handler = EventHandler()
+
+    # A container to hold the column of cards
+    card_column = None
+
+    ui.add_body_html('''
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.body.style.userSelect = 'none';
+        });
+    </script>
+    ''')
+    
+    @ui.refreshable
+    def generate_custom_field_cards() -> None:
+        ui.notify("Refreshing cards")
+        nonlocal card_column
+        
+        app.storage.tab['cards'].clear()
+        card_column.clear()  # Remove old card component
+
+        with card_column:
+            with ui.column().classes('w-full').style('gap: 7px;'):
+                for field in app.storage.general['custom_fields']:
+                    app.storage.tab['cards'].append(CustomFieldCard(field, event_handler))
+                    
+                    # cards.append(card_instance)
+                event_handler.set_custom_field_cards(cards)
+    
     with ui.header(elevated=True).style('background-color: #3874c8; padding: 10px 10px;').classes('items-center justify-between'):
         # Left-aligned title
         ui.label("Custom Field Management").style('font-size: 1.5em; font-weight: bold; color: white;')
 
+        ui.button('Delete Fields', on_click= lambda: app.storage.general['custom_fields'].pop())
+        ui.button('Update Fields', on_click=generate_custom_field_cards.refresh)
 
         access_token = ui.input(
             placeholder="Enter Access Token..."
@@ -281,52 +315,38 @@ def main_page():
 
     """Main NiceGUI Page with Clickable and Filterable Custom Field Cards."""
     with ui.row().style('width: 100%; height: calc(100vh - 120px); display: flex;') as page_container:
-        page_container.on('click', event_handler.container_click)
-        # Left Content (Inside a Scroll Area)
+        page_container.on('dblclick', event_handler.deselect_all_cards)
+        
+        # Scroll Area for Custom Field Sets
         with ui.scroll_area().style('flex: 1; height: 100%; padding: 0; margin: 0;'):
             with ui.column().style('width: 100%; padding: 20px;'):
                 ui.label('Left Side Content')
-                ui.button('Click Me', on_click=lambda: ui.notify('Left button clicked'))
-                # Add button to trigger the move function
-                ui.button("Move Selected Cards", on_click=move_selected_cards).style(
-                    "margin-top: 10px; font-size: 1.2em; padding: 10px;"
-                )
 
-
-        # Divider
         with ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;'):
             pass
 
         # Right Section - Custom Fields
         with ui.column().style('flex: 1; height: 100%; padding: 10; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke;'):
             
-            # Fixed Filter Input (Above the Scroll Area)
+            # Search box always visible
             with ui.column().style('width: 100%; background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
-                # Function to filter cards dynamically
-                def update_cards():
+                
+                def filter_fields():
                     search_text = filter_input.value
                     logging.debug(f"Filtering with: {search_text}")
-                    for card in cards:
+                    for card in app.storage.tab['cards']:
                         card.update_visibility(search_text)  # Update visibility
                     
                 # Input field for filtering
                 with ui.row():
-                    filter_input = ui.input(placeholder="Filter fields by name...", on_change=update_cards).style(
+                    filter_input = ui.input(placeholder="Filter fields by name...", on_change=filter_fields).style(
                 'width: 600px; font-size: 1.5em; border-radius: 5px; '
                 'border: 2px;'
             )
 
-            # Scroll Area for Cards (Below the Fixed Filter)
-            card_list = ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;')
-            with card_list:
-                with ui.column().classes('w-full').style('gap: 7px;'):
-                    # List to store card instances
-                    cards = []
-
-                    for field in custom_fields:
-                        card_instance = CustomFieldCard(field, event_handler)  # Create a card for each field
-                        cards.append(card_instance)  # Store the instance in the list
-                    event_handler.set_custom_field_cards(cards)
-                    
-                    
+            # Scroll area for cards
+            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
+                card_column = ui.column().classes('w-full')
+                generate_custom_field_cards()  # Initial render
+                app.storage.tab['card_list'] = generate_custom_field_cards
 ui.run()
