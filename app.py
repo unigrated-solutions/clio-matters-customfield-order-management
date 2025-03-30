@@ -39,7 +39,8 @@ else:
         
     if not app.storage.general.get('custom_field_sets'):
         app.storage.general['custom_field_sets'] = []
-        
+    app.storage.general['custom_fields'].sort(key=lambda x: x['display_order'])
+    
 async def copy(selected_token):
     ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
 

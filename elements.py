@@ -338,7 +338,13 @@ class CustomFieldsHandler:
 
     #Replace with API patch call    
     def log_display_order_change(self, item_id, new_order):
+        ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")        
+        return True  # Simulate a successful result
+    
+    def update_position(self, item_id, new_order):
         ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")
+        update_custom_field_display_order(app.storage.tab['api_client'], item_id, new_order)
+        
         return True  # Simulate a successful result
 
     def move_item(self, moving_id, target_id, position, on_display_order_change):
@@ -412,13 +418,13 @@ class CustomFieldsHandler:
         first_move_complete = False
         for id in moving_ids:
             if not first_move_complete:
-                success = self.move_item(id, target_id, position, self.log_display_order_change)
+                success = self.move_item(id, target_id, position, self.update_position)
                 if success:
                     first_move_complete = True
                     position = 'after'
                     target_id = id
             else:
-                success = self.move_item(id, target_id, position, self.log_display_order_change)
+                success = self.move_item(id, target_id, position, self.update_position)
                 if success:
                     target_id = id
                     
