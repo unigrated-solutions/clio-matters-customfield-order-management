@@ -50,10 +50,12 @@ async def main_page():
     app.storage.tab['api_client'] = create_client_session()
     app.storage.tab['fields'] = []
     app.storage.tab['field_set_cards'] = []
+    
     event_handler = EventHandler()
-    field_handler = CustomFieldsHandler(event_handler)
     field_set_handler = CustomFieldSetsHandler()
-
+    field_handler = CustomFieldsHandler(event_handler, field_set_handler=field_set_handler)
+    field_set_handler.update_field_handler(field_handler)
+    
     app.storage.tab['field_handler'] = field_handler
     app.storage.tab['field_set_handler'] = field_set_handler
     ui.add_body_html('''
@@ -95,6 +97,7 @@ async def main_page():
             if app.storage.general.get('access_token'):
                 access_token.set_value(app.storage.general['access_token'])
                 update_access_token(app.storage.tab['api_client'], app.storage.general['access_token'])
+            
             access_token.bind_value_to(app.storage.tab, 'api_key')
             access_token.on('change', lambda: update_access_token(app.storage.tab['api_client'], access_token.value))
             

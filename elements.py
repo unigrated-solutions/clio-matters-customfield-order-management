@@ -101,10 +101,11 @@ class EventHandler:
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
-    def __init__(self, field_data, event_handler: EventHandler):
+    def __init__(self, field_data, event_handler: EventHandler, field_handler):
         """Initialize the card with field data."""
         
         self.event_handler = event_handler
+        self.field_handler = field_handler
         self.field_data = field_data
         self.selected = False  # Track whether the card is selected
 
@@ -122,8 +123,8 @@ class CustomFieldCard:
             
         with self.card:
             with ui.context_menu():
-                ui.menu_item("Insert Above", lambda: move_selected_cards(self.id, "before"))
-                ui.menu_item('Insert Below', lambda: move_selected_cards(self.id, "after"))
+                ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before"))
+                ui.menu_item('Insert Below', lambda: self.field_handler.move_selected_cards(self.id, "after"))
                 
                 
             with ui.row().style('width: 100%; justify-content: space-between;'):
@@ -175,65 +176,6 @@ class CustomFieldCard:
         """Update the card's current position dynamically."""
         self.display_order = new_position
 
-class CustomFieldsHandler:
-    def __init__(self, event_handler):
-        self.event_handler:EventHandler = event_handler
-        self.layout = None
-        
-    def load(self):
-        fields:list = app.storage.tab['fields']
-        
-        with ui.column().classes('w-full'):
-            with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
-                for custom_field in app.storage.general['custom_fields']:
-                    field = CustomFieldCard(custom_field, self.event_handler)
-                    fields.append(field)
-
-                self.event_handler.set_custom_field_cards(fields)
-    
-    @ui.refreshable
-    def update_fields(self) -> None:
-        ui.notify("Refreshing cards")
-        custom_field_cards = app.storage.tab['fields']
-        
-        for card in custom_field_cards:
-            new_index = card.display_order
-            card.card.move(target_index=new_index)
-
-    def clear_and_refresh(self):
-        fields:list = app.storage.tab['fields']
-        fields.clear()
-        self.layout.clear()
-        with self.layout:
-            for custom_field in app.storage.general['custom_fields']:
-                field = CustomFieldCard(custom_field, self.event_handler)
-                fields.append(field)
-
-            self.event_handler.set_custom_field_cards(fields)
-
-    async def load_from_api(self, parent_type="matter", client:Client=None):
-        ui.notify('Attempting to send request')
-        response = await run.io_bound(get_custom_fields, client, parent_type)
-        data = response.get('data', [])
-
-        data = sorted(data, key=lambda x: x['display_order'])
-        app.storage.general['custom_fields'] = data
-        self.clear_and_refresh()
-        
-        if response:
-            ui.notify(data)
-        else:
-            ui.notify("Failed to Download Fields")
-            
-class CustomFieldSetsHandler:
-    def __init__(self):
-        self.layout = None
-        
-    def load(self):
-        with ui.column().style('width: 100%; padding: 20px;') as self.layout:
-            for field_set in app.storage.general['custom_field_sets']:
-                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
-
 class CustomFieldSetCard:
     def __init__(self, field_set_data):
         """Initialize the custom field set card with data."""
@@ -257,9 +199,12 @@ class CustomFieldSetCard:
         self.custom_field_data.sort(key=lambda f: f['display_order'])
 
         # Card Layout
-        self.card = ui.card().classes('w-full justify-center')
+        self.card = ui.card().classes('w-full justify-center border border-gray-300 rounded-md !bg-white')
+
+
         self.reorder_custom_fields()  # initial layout call
 
+    #This needs to be redone to reorder the element index in the layout rather than clearing and regenerating
     @ui.refreshable
     def reorder_custom_fields(self):
         # 🔄 Re-fetch the latest field info from storage
@@ -284,16 +229,214 @@ class CustomFieldSetCard:
         self.card.clear()
         with self.card:
             # Header label
-            ui.label(self.name).classes('text-xl font-bold w-full text-center')
+            ui.label(self.name).classes('text-xl font-bold w-full text-center border border-gray-300 bg-gray-100 rounded px-2 py-1')
 
-        with ui.grid(columns=2).classes('w-full gap-3'):
-            for field in self.custom_field_data:
-                label = ui.label(field['name']).classes(
-                    'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
-                ).style(
-                    'display: flex; align-items: center; justify-content: center; height: 100%;'
-                )
+            with ui.grid(columns=2).classes('w-full gap-3'):
+                for field in self.custom_field_data:
+                    label = ui.label(field['name']).classes(
+                        'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
+                    ).style(
+                        'display: flex; align-items: center; justify-content: center; height: 100%;'
+                    )
 
-                # ✅ Bind visibility only if the field is deleted
-                if field.get('deleted', False):
-                    label.bind_visibility_from(app.storage.tab, 'display_deleted')
+                    # ✅ Bind visibility only if the field is deleted
+                    if field.get('deleted', False):
+                        label.bind_visibility_from(app.storage.tab, 'display_deleted')
+
+class CustomFieldSetsHandler:
+    def __init__(self, field_handler=None):
+        self.layout = None
+        self.field_handler = field_handler
+        
+    def load(self):
+        if not self.layout:
+            self.layout = ui.column().style('width: 100%; padding: 20px;')
+        with self.layout:
+            for field_set in app.storage.general['custom_field_sets']:
+                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
+
+    def update_field_handler(self, new_handler):
+        self.field_handler = new_handler
+        
+    def update_field_sets(self) -> None:
+        app.storage.tab['field_set_cards'].clear()
+        self.layout.clear()
+        app.storage.tab['field_set_cards'] = []
+        with self.layout:
+            for field_set in app.storage.general['custom_field_sets']:
+                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
+
+    async def load_from_api(self, parent_type="matter", client:Client=None):
+        response = await run.io_bound(get_custom_field_sets, client, parent_type)
+
+        app.storage.general['custom_field_sets'] = response.get('data', [])
+        self.update_field_sets()
+        
+        if response:
+            ui.notify("Field sets loaded from API")
+        else:
+            ui.notify("Failed to Download Fields Sets")
+            
+class CustomFieldsHandler:
+    def __init__(self, event_handler, field_set_handler:CustomFieldSetsHandler=None):
+        self.event_handler:EventHandler = event_handler
+        self.field_set_handler:CustomFieldSetsHandler = field_set_handler
+        self.layout = None
+        
+    def load(self):
+        fields:list = app.storage.tab['fields']
+        
+        with ui.column().classes('w-full'):
+            with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
+                for custom_field in app.storage.general['custom_fields']:
+                    field = CustomFieldCard(custom_field, self.event_handler, self)
+                    fields.append(field)
+
+                self.event_handler.set_custom_field_cards(fields)
+    
+    def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
+        self.field_set_handler = new_handler
+        
+    @ui.refreshable
+    def update_fields(self) -> None:
+        # ui.notify("Refreshing Fields")
+        custom_field_cards = app.storage.tab['fields']
+        field_data = app.storage.general['custom_fields']
+        for card in custom_field_cards:
+            new_index = card.display_order
+            card.card.move(target_index=new_index)
+            storage_index = next((i for i, d in enumerate(field_data) if d['id'] == card.id), -1)
+            app.storage.general['custom_fields'][storage_index]['display_order'] = new_index
+            
+    def clear_and_refresh(self):
+        fields:list = app.storage.tab['fields']
+        fields.clear()
+        self.layout.clear()
+        with self.layout:
+            for custom_field in app.storage.general['custom_fields']:
+                field = CustomFieldCard(custom_field, self.event_handler, self)
+                fields.append(field)
+
+            self.event_handler.set_custom_field_cards(fields)
+
+    async def load_from_api(self, parent_type="matter", client:Client=None):
+
+        response = await run.io_bound(get_custom_fields, client, parent_type)
+        
+        data = response.get('data', [])
+        data = sorted(data, key=lambda x: x['display_order'])
+        app.storage.general['custom_fields'] = data
+        self.clear_and_refresh()
+
+        if self.field_set_handler:
+            await self.field_set_handler.load_from_api(parent_type, client)
+            
+        if response:
+            ui.notify("Fields loaded from API")
+        else:
+            ui.notify("Failed to Download Fields")
+
+    #Replace with API patch call    
+    def log_display_order_change(self, item_id, new_order):
+        ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")
+        return True  # Simulate a successful result
+
+    def move_item(self, moving_id, target_id, position, on_display_order_change):
+        cards = app.storage.tab['fields']
+        cards = sorted(cards, key=lambda x: x.display_order)
+
+        moving_item = next(card for card in cards if card.id == moving_id)
+        target_item = next(card for card in cards if card.id == target_id)
+
+        moving_order = moving_item.display_order
+        target_order = target_item.display_order
+
+        if moving_order == target_order:
+            return True
+
+        if moving_order < target_order:
+            if position == 'after':
+                new_order = target_order
+                success = on_display_order_change(moving_id, new_order)
+                if success:
+                    for card in cards:
+                        if card.id == moving_id:
+                            card.display_order = new_order
+                        elif moving_order < card.display_order <= target_order:
+                            card.display_order -= 1
+                    return True
+
+            elif position == 'before':
+                new_order = target_order - 1
+                success = on_display_order_change(moving_id, new_order)
+                if success:
+                    for card in cards:
+                        if card.id == moving_id:
+                            card.display_order = new_order
+                        elif moving_order < card.display_order < target_order:
+                            card.display_order -= 1
+                    return True
+
+        elif moving_order > target_order:
+            if position == 'after':
+                new_order = target_order + 1
+                success = on_display_order_change(moving_id, new_order)
+                if success:
+                    for card in cards:
+                        if card.id == moving_id:
+                            card.display_order = new_order
+                        elif target_order < card.display_order < moving_order:
+                            card.display_order += 1
+                    return True
+
+            elif position == 'before':
+                new_order = target_order
+                success = on_display_order_change(moving_id, new_order)
+                if success:
+                    for card in cards:
+                        if card.id == moving_id:
+                            card.display_order = new_order
+                        elif target_order <= card.display_order < moving_order:
+                            card.display_order += 1
+                    return True
+
+        return False
+
+    def bulk_move_items(self, moving_ids, target_id, position):
+        cards = app.storage.tab['fields']
+
+        # Map of id to card for lookup
+        id_to_order = {card.id: card.display_order for card in cards}
+        moving_ids = sorted(moving_ids, key=lambda x: id_to_order.get(x, float('inf')))
+
+        first_move_complete = False
+        for id in moving_ids:
+            if not first_move_complete:
+                success = self.move_item(id, target_id, position, self.log_display_order_change)
+                if success:
+                    first_move_complete = True
+                    position = 'after'
+                    target_id = id
+            else:
+                success = self.move_item(id, target_id, position, self.log_display_order_change)
+                if success:
+                    target_id = id
+                    
+    def move_selected_cards(self, target_id, position):
+        cards = app.storage.tab['fields']
+
+        selected_cards = [card for card in cards if card.selected]
+        if not selected_cards:
+            ui.notify("No cards selected!", color="red")
+            return
+
+        moving_ids = [card.id for card in selected_cards]
+        if not moving_ids:
+            return
+        
+        self.bulk_move_items(moving_ids, target_id, position)
+        self.update_fields()
+        
+        if self.field_set_handler:
+            self.field_set_handler.update_field_sets()
+        
