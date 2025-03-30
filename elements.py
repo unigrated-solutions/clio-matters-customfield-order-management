@@ -4,6 +4,8 @@ import logging
 from nicegui import ui, app
 from nicegui.events import KeyEventArguments
 
+from api import *
+
 logging.basicConfig(level=logging.DEBUG)
 
 def generate_selection_range(number1, number2):
@@ -13,80 +15,6 @@ def generate_selection_range(number1, number2):
     elif number1 > number2:
         return range(number1 - 1, number2, -1)  # Excludes both ends
     return []  # If both numbers are the same, return an empty range
-
-def calculate_final_positions(custom_fields, moving_ids, target_position):
-    """
-    Calculates the final positions of all items after moving selected cards.
-
-    Parameters:
-    - custom_fields (list): List of dictionaries with 'display_order'.
-    - moving_ids (list): List of current positions to be moved.
-    - target_position (int): The position where items should be inserted.
-
-    Returns:
-    - list: Updated list of custom fields with adjusted positions.
-    """
-    # Sort moving items by their current position
-    moving_items = sorted(
-        [item for item in custom_fields if item["display_order"] in moving_ids],
-        key=lambda x: x["display_order"]
-    )
-
-    # Get remaining items (excluding moving items)
-    remaining_items = [item for item in custom_fields if item["display_order"] not in moving_ids]
-
-    # Count how many moving items came from below the target position
-    count_below_target = sum(1 for item in moving_items if item["display_order"] < target_position)
-
-    # Adjust the insertion position dynamically
-    adjusted_target_position = target_position - count_below_target
-
-    # Create a new list for the reordered items
-    new_items = []
-
-    for idx, item in enumerate(remaining_items):
-        if idx == adjusted_target_position:
-            new_items.extend(moving_items)  # Insert all moving items at the correct spot
-        new_items.append(item)
-
-    # If adjusted_target_position is at the end, append moving items
-    if adjusted_target_position >= len(remaining_items):
-        new_items.extend(moving_items)
-
-    # Reassign `display_order` values
-    for idx, item in enumerate(new_items):
-        item["display_order"] = idx + 1  # Keep positions starting from 1
-
-    return new_items
-
-def move_selected_cards(target_position=5):
-    """Gathers selected cards, updates positions, and regenerates UI in new order."""
-    cards = app.storage.tab['cards']
-    custom_fields = app.storage.general['custom_fields']
-    
-    # Get selected cards
-    selected_cards = [card for card in cards if card.selected]
-    ui.notify(selected_cards)
-    
-    if not selected_cards:
-        ui.notify("No cards selected!", color="red")
-        return
-
-    # Extract moving IDs
-    moving_ids = [card.display_order for card in selected_cards]
-
-    # Calculate new positions
-    updated_fields = calculate_final_positions(custom_fields, moving_ids, target_position)
-
-    # **Update the global `custom_fields` with the new order**
-    app.storage.general['custom_fields'] = sorted(updated_fields, key=lambda x: x["display_order"])  # Sort by position
-    app.storage.tab['card_list'].refresh()
-    for field_set in app.storage.tab['field_set_cards']:
-
-        field_set.reorder_custom_fields.refresh()
-
-    # Notify success
-    ui.notify(f"Moved {len(selected_cards)} cards to position {target_position}!", color="green")
 
 class EventHandler:
     def __init__(self):
@@ -169,7 +97,7 @@ class EventHandler:
         for card in self.custom_field_cards:
             if card.deleted:
                 card.set_visibility(value)
-            
+
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
@@ -194,8 +122,9 @@ class CustomFieldCard:
             
         with self.card:
             with ui.context_menu():
-                ui.menu_item("Insert Above", lambda: move_selected_cards(self.display_order - 1))
-                ui.menu_item('Insert Below', lambda: move_selected_cards(self.display_order))
+                ui.menu_item("Insert Above", lambda: move_selected_cards(self.id, "before"))
+                ui.menu_item('Insert Below', lambda: move_selected_cards(self.id, "after"))
+                
                 
             with ui.row().style('width: 100%; justify-content: space-between;'):
                 with ui.column():
@@ -245,6 +174,65 @@ class CustomFieldCard:
     def update_position(self, new_position):
         """Update the card's current position dynamically."""
         self.display_order = new_position
+
+class CustomFieldsHandler:
+    def __init__(self, event_handler):
+        self.event_handler:EventHandler = event_handler
+        self.layout = None
+        
+    def load(self):
+        fields:list = app.storage.tab['fields']
+        
+        with ui.column().classes('w-full'):
+            with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
+                for custom_field in app.storage.general['custom_fields']:
+                    field = CustomFieldCard(custom_field, self.event_handler)
+                    fields.append(field)
+
+                self.event_handler.set_custom_field_cards(fields)
+    
+    @ui.refreshable
+    def update_fields(self) -> None:
+        ui.notify("Refreshing cards")
+        custom_field_cards = app.storage.tab['fields']
+        
+        for card in custom_field_cards:
+            new_index = card.display_order
+            card.card.move(target_index=new_index)
+
+    def clear_and_refresh(self):
+        fields:list = app.storage.tab['fields']
+        fields.clear()
+        self.layout.clear()
+        with self.layout:
+            for custom_field in app.storage.general['custom_fields']:
+                field = CustomFieldCard(custom_field, self.event_handler)
+                fields.append(field)
+
+            self.event_handler.set_custom_field_cards(fields)
+
+    async def load_from_api(self, parent_type="matter", client:Client=None):
+        ui.notify('Attempting to send request')
+        response = await run.io_bound(get_custom_fields, client, parent_type)
+        data = response.get('data', [])
+
+        data = sorted(data, key=lambda x: x['display_order'])
+        app.storage.general['custom_fields'] = data
+        self.clear_and_refresh()
+        
+        if response:
+            ui.notify(data)
+        else:
+            ui.notify("Failed to Download Fields")
+            
+class CustomFieldSetsHandler:
+    def __init__(self):
+        self.layout = None
+        
+    def load(self):
+        with ui.column().style('width: 100%; padding: 20px;') as self.layout:
+            for field_set in app.storage.general['custom_field_sets']:
+                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
 
 class CustomFieldSetCard:
     def __init__(self, field_set_data):
