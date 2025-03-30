@@ -27,6 +27,7 @@ def update_access_token(client:Client, api_key):
 # Converted the datatype on purpose to test the API clients validate_and_convert function
 # https://github.com/unigrated-solutions/clio-api-python-client/blob/main/classes/base.py
 # TODO: Update API client to convert Literal capitalization mismatches so that Matter/matter or Contact/contact get converted automatically
+# https://github.com/unigrated-solutions/clio-api-python-client/commit/6e80fd0906d55548fb7d79b1352e268327234170
 def update_custom_field_display_order(client:Client, field_id, new_position):
     field_id=str(field_id)
     new_position=str(new_position)
