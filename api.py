@@ -19,7 +19,7 @@ def create_client_session(api_key=""):
     return Client(access_token=api_key, store_responses=False, async_requests=False)
 
 def update_access_token(client:Client, api_key):
-    ui.notify(f'Setting Access Token: {api_key}')
+    ui.notify(f'Setting Access Token')
     client.set_bearer_token(api_key)
 
 # Patch request to API to update display_order
@@ -42,9 +42,10 @@ def update_custom_field_display_order(client:Client, field_id, new_position):
         logging.debug(f"An error occurred: {e}")
           
 def get_custom_fields(client:Client=None, parent_type="matter"):
+    # ui.notify(client)
     try:
         response = {"Success": True}
-        response = client.all.custom_fields(fields="id,name,display_order,deleted", parent_type=parent_type)
+        response = client.all.custom_fields(fields="id,name,display_order,deleted, parent_type", parent_type=parent_type)
         logging.debug(json.dumps(response, indent=2))
         return response
     

@@ -18,6 +18,10 @@ def generate_selection_range(number1, number2):
 
 class EventHandler:
     def __init__(self):
+        
+        self.field_handler = None
+        self.field_set_handler = None
+        
         self.custom_field_cards = []
         self.mousedown = False
         self.shift_down = False
@@ -40,7 +44,7 @@ class EventHandler:
         # print(e.key)
         if e.key == 'Shift':
             if e.action.keydown:
-                # ui.notify('Shift Down')
+                ui.notify('Shift Down')
                 self.shift_down = True
             if e.action.keyup:
                 self.shift_down = False
@@ -56,9 +60,12 @@ class EventHandler:
 
         if e.key == "Escape":
             self.deselect_all_cards()
+        
+        if e.key == 't' and self.ctrl_down and e.action.keydown:
+            app.storage.tab["display_deleted"] = not app.storage.tab.get("display_deleted", False)
             
     def handle_card_click(self, custom_field_card):
-        # ui.notify(custom_field_card)
+
         # Save the previous clicked card before updating
         last_card = self.last_card_clicked  # Store the old value before updating
         last_cards_position = last_card.display_order if last_card else None  # Correctly reference the last position
@@ -97,7 +104,10 @@ class EventHandler:
         for card in self.custom_field_cards:
             if card.deleted:
                 card.set_visibility(value)
-
+                
+    def parent_type_changed(self, new_parent_type):
+        ui.notify(f'Parent type set to: {new_parent_type}')
+        
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
@@ -107,7 +117,7 @@ class CustomFieldCard:
         self.event_handler = event_handler
         self.field_handler = field_handler
         self.field_data = field_data
-        self.selected = False  # Track whether the card is selected
+        self.selected = False  # Track whether a card is selected
 
         # Create a card with default styles
         self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
@@ -115,6 +125,7 @@ class CustomFieldCard:
         # Bind name and position dynamically from field data
         self.id = field_data["id"]
         self.name = field_data["name"]
+        self.parent_type = field_data.get("parent_type")
         self.display_order = field_data["display_order"]  # Ensure position updates dynamically
         self.deleted = field_data["deleted"]
         
@@ -182,6 +193,7 @@ class CustomFieldSetCard:
         self.field_set_data = field_set_data
         self.id = field_set_data["id"]
         self.name = field_set_data["name"]
+        self.parent_type = field_set_data.get("parent_type")
         self.custom_fields = field_set_data["custom_fields"]  # [{'id': 111}, {'id': 222}, ...]
 
         # Lookup full custom field data from global storage
@@ -273,9 +285,9 @@ class CustomFieldSetsHandler:
         self.update_field_sets()
         
         if response:
-            ui.notify("Field sets loaded from API")
+            return True
         else:
-            ui.notify("Failed to Download Fields Sets")
+            return False
             
 class CustomFieldsHandler:
     def __init__(self, event_handler, field_set_handler:CustomFieldSetsHandler=None):
@@ -320,9 +332,10 @@ class CustomFieldsHandler:
             self.event_handler.set_custom_field_cards(fields)
 
     async def load_from_api(self, parent_type="matter", client:Client=None):
+        parent_type = app.storage.tab['visible_parent_type']
 
         response = await run.io_bound(get_custom_fields, client, parent_type)
-        
+        print(response)
         data = response.get('data', [])
         data = sorted(data, key=lambda x: x['display_order'])
         app.storage.general['custom_fields'] = data
@@ -330,7 +343,8 @@ class CustomFieldsHandler:
 
         if self.field_set_handler:
             await self.field_set_handler.load_from_api(parent_type, client)
-            
+        app.storage.general['parent_type'] = parent_type
+        
         if response:
             ui.notify("Fields loaded from API")
         else:
