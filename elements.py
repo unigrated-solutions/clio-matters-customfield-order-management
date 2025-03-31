@@ -62,8 +62,7 @@ class EventHandler:
             self.deselect_all_cards()
         
         if e.key == 't' and self.ctrl_down and e.action.keydown:
-            app.storage.tab["display_deleted"] = not app.storage.tab.get("display_deleted", False)
-            
+            self.toggle_display_deleted()            
     def handle_card_click(self, custom_field_card):
 
         # Save the previous clicked card before updating
@@ -99,6 +98,9 @@ class EventHandler:
     
     def do_nothing(self):
         pass
+    
+    def toggle_display_deleted(self):
+        app.storage.tab["display_deleted"] = not app.storage.tab.get("display_deleted", False)
     
     def toggle_deleted_field_visibility(self, value):
         for card in self.custom_field_cards:

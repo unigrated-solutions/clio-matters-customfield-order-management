@@ -151,7 +151,7 @@ async def main_page():
                     if not app.storage.tab.get('display_deleted'):
                         app.storage.tab['display_deleted'] = True
                     toggle_deleted_field = ui.switch("Show Deleted", value=True).bind_value_from(app.storage.tab,'display_deleted')
-                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
+                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
                     toggle_deleted_field.on_value_change(lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
                     ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api(client=app.storage.tab['api_client']))
 
