@@ -61,7 +61,7 @@ class EventHandler:
         if e.key == "Escape":
             self.deselect_all_cards()
         
-        if e.key == 't' and self.ctrl_down and e.action.keydown:
+        if e.key == 'd' and self.ctrl_down and e.action.keydown:
             self.toggle_display_deleted()            
     def handle_card_click(self, custom_field_card):
 
