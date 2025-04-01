@@ -354,7 +354,7 @@ class CustomFieldSetsHandler:
         with self.layout:
             print(app.storage.general['custom_field_sets'][self.parent_type])
             for field_set in app.storage.general['custom_field_sets'][self.parent_type]:
-                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
+                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
 
     async def load_from_storage(self, parent_type="matter"):
         parent_type = self.event_handler.parent_type
