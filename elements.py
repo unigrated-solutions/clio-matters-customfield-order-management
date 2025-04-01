@@ -352,7 +352,6 @@ class CustomFieldSetsHandler:
         self.layout.clear()
         app.storage.tab['field_set_cards'] = []
         with self.layout:
-            print(app.storage.general['custom_field_sets'][self.parent_type])
             for field_set in app.storage.general['custom_field_sets'][self.parent_type]:
                 app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
 
@@ -397,6 +396,8 @@ class CustomFieldsHandler:
 
                 self.event_handler.set_custom_field_cards(fields)
     
+        self.update_fields()
+        
     def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
         self.field_set_handler = new_handler
         
@@ -569,3 +570,4 @@ class CustomFieldsHandler:
         if self.field_set_handler:
             self.field_set_handler.update_field_sets()
         
+        self.event_handler.deselect_all_cards()
