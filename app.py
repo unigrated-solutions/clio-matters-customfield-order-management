@@ -3,43 +3,11 @@ import time
 import logging
 
 from nicegui import ui, app
-from nicegui.events import KeyEventArguments, ClickEventArguments
 
 from elements import *
 from api import *
 
 logging.basicConfig(level=logging.DEBUG)
-USING_TEST_FIELDS = False
-
-if USING_TEST_FIELDS:
-    # Sample custom fields data
-    app.storage.general['custom_fields'] = [
-        {'id':000 , 'deleted': False, "name": "Field 0", "display_order": 0},
-        {'id':111 , 'deleted': False, "name": "Field 1", "display_order": 1},
-        {'id':222 , 'deleted': False, "name": "Field 2", "display_order": 2},
-        {'id':333 , 'deleted': False, "name": "Field 3", "display_order": 3},
-        {'id':444 , 'deleted': False, "name": "Field 4", "display_order": 4},
-        {'id':555 , 'deleted': False, "name": "Field 5", "display_order": 5},
-        {'id':666 , 'deleted': False, "name": "Field 6", "display_order": 6},
-        {'id':777 , 'deleted': False, "name": "Field 7", "display_order": 7},
-        {'id':888 , 'deleted': False, "name": "Field 8", "display_order": 8},    
-        {'id':999 , 'deleted': True, "name": "Field 9", "display_order": 9},
-        {'id':110 , 'deleted': False, "name": "Field 10", "display_order": 10},
-        {'id':110 , 'deleted': True, "name": "Field 11", "display_order": 11},
-        {'id':120 , 'deleted': False, "name": "Field 12", "display_order": 12},    
-    ]
-    app.storage.general['custom_field_sets'] = [
-        {"id": 999, "name": "Field Set 1", "custom_fields": [{"id": 111},{"id": 222},{"id": 333},{"id": 444}]},
-        {"id": 888, "name": "Field Set 2", "custom_fields": [{"id": 444},{"id": 555},{"id": 888},{"id": 222},{"id": 999}]}
-        ]
-
-else:
-    if not app.storage.general.get('custom_fields'):
-        app.storage.general['custom_fields'] = []
-        
-    if not app.storage.general.get('custom_field_sets'):
-        app.storage.general['custom_field_sets'] = []
-    app.storage.general['custom_fields'].sort(key=lambda x: x['display_order'])
     
 async def copy(selected_token):
     ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
@@ -47,51 +15,43 @@ async def copy(selected_token):
 
 @ui.page("/")
 async def main_page():
+    
+    if not app.storage.general.get('custom_fields'):
+        app.storage.general['custom_fields'] = {"matter": [], "contact": []}
+        
+    if not app.storage.general.get('custom_field_sets'):
+        app.storage.general['custom_field_sets'] = {"matter": [], "contact": []}
+        
     await ui.context.client.connected()
-    app.storage.tab['api_client_loaded'] = False
-    app.storage.tab['api_client'] = create_client_session()
     app.storage.tab['fields'] = []
     app.storage.tab['field_set_cards'] = []
-    if app.storage.general.get('parent_type', "") == "contact":
-        app.storage.tab['visible_parent_type'] = 'contact'
-    else:
-        app.storage.tab['visible_parent_type'] = 'matter'
+    parent_type = app.storage.general.get('parent_type', "matter")
     
-    event_handler = EventHandler()
-    field_set_handler = CustomFieldSetsHandler()
-    field_handler = CustomFieldsHandler(event_handler, field_set_handler=field_set_handler)
-    field_set_handler.update_field_handler(field_handler)
-    
-    app.storage.tab['field_handler'] = field_handler
-    app.storage.tab['field_set_handler'] = field_set_handler
+    event_handler = EventHandler(parent_type)
+    field_handler, field_set_handler = event_handler.init_handlers()
+
     ui.add_body_html('''
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            document.body.style.userSelect = 'none';
-        });
-    </script>
-    ''')
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+                document.body.style.userSelect = 'none';
+            });
+        </script>
+        ''')
     
     def store_access_token(token):
         app.storage.general['access_token'] = token
         ui.notify("Access Token Saved")
     
     async def update_matter_contact_button_text():
-        if app.storage.tab['visible_parent_type'] == "matter":
-            app.storage.tab['visible_parent_type'] = "contact"
+        if event_handler.parent_type == "matter":
             matter_contact_button.set_text("Switch to Matter custom fields")
-            await field_handler.load_from_api(client=app.storage.tab['api_client'], parent_type="contact")
-            return
-        
-        if app.storage.tab['visible_parent_type'] == "contact":
-            app.storage.tab['visible_parent_type'] = "matter"
+
+        if event_handler.parent_type == "contact":
             matter_contact_button.set_text("Switch to Contact custom fields")
-            await field_handler.load_from_api(client=app.storage.tab['api_client'], parent_type="matter")
-            return
     
     with ui.header(elevated=True).style('background-color: #3874c8; padding: 10px 10px;').classes('items-center justify-between'):
-
-        ui.label().bind_text_from(app.storage.tab, 'visible_parent_type').style('font-size: 1.5em; font-weight: bold; color: white; text-transform: capitalize;')
+        with ui.row():
+            ui.label().bind_text_from(event_handler, 'parent_type').style('font-size: 1.5em; font-weight: bold; color: white; text-transform: capitalize;')
 
         with ui.row():
             save_button = ui.button(icon='save').style('height: 50px;')
@@ -109,14 +69,16 @@ async def main_page():
             
             if app.storage.general.get('access_token'):
                 access_token.set_value(app.storage.general['access_token'])
-                update_access_token(app.storage.tab['api_client'], app.storage.general['access_token'])
+                event_handler.update_access_token(app.storage.general['access_token'])
             
             access_token.bind_value_to(app.storage.tab, 'api_key')
-            access_token.on('change', lambda: update_access_token(app.storage.tab['api_client'], access_token.value))
+            access_token.on('change', lambda: event_handler.update_access_token(access_token.value))
             
         matter_contact_button = ui.button('Switch to Contact custom fields')
+        matter_contact_button.on('click', event_handler.toggle_parent_type)
         matter_contact_button.on('click', update_matter_contact_button_text)
-        matter_contact_button.on('click', lambda: event_handler.parent_type_changed(app.storage.tab['visible_parent_type']))
+        
+        
         if app.storage.general.get('parent_type', "") == "contact":
             matter_contact_button.set_text("Switch to Matter custom fields")
 
@@ -149,11 +111,11 @@ async def main_page():
                         'border: 2px;'
                     )
                     if not app.storage.tab.get('display_deleted'):
-                        app.storage.tab['display_deleted'] = True
-                    toggle_deleted_field = ui.switch("Show Deleted", value=True).bind_value_from(app.storage.tab,'display_deleted')
+                        app.storage.tab['display_deleted'] = False
+                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab,'display_deleted')
                     toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
-                    toggle_deleted_field.on_value_change(lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
-                    ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api(client=app.storage.tab['api_client']))
+                    # toggle_deleted_field.on_value_change(lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
+                    ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api())
 
             # Scroll area for cards
             with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):

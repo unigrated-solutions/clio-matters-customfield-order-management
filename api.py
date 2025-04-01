@@ -15,12 +15,7 @@ from client import Client
 logging.basicConfig(level=logging.DEBUG)
 
 def create_client_session(api_key=""):
-    app.storage.tab['api_client_loaded'] = True
     return Client(access_token=api_key, store_responses=False, async_requests=False)
-
-def update_access_token(client:Client, api_key):
-    ui.notify(f'Setting Access Token')
-    client.set_bearer_token(api_key)
 
 # Patch request to API to update display_order
 # Query/Path/Request Body arguments are already split automatically so there's no need to separate them 
@@ -57,7 +52,7 @@ def get_custom_field_sets(client:Client=None, parent_type="Matter"):
     parent_type=parent_type.title()
     try:
         response = {"Success": True}
-        response = client.all.custom_field_sets(fields="id,name,custom_fields{id}", parent_type=parent_type)
+        response = client.all.custom_field_sets(fields="id,name,parent_type,custom_fields{id}", parent_type=parent_type)
         logging.debug(json.dumps(response, indent=2))
         return response
     

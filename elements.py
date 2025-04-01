@@ -17,8 +17,10 @@ def generate_selection_range(number1, number2):
     return []  # If both numbers are the same, return an empty range
 
 class EventHandler:
-    def __init__(self):
+    def __init__(self, parent_type):
         
+        self.api_client = create_client_session()
+        self.parent_type = parent_type
         self.field_handler = None
         self.field_set_handler = None
         
@@ -31,6 +33,20 @@ class EventHandler:
         self.last_card_clicked = None
         self.last_card_click_timestamp = 0
 
+    def init_handlers(self):
+        field_set_handler = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
+        field_handler = CustomFieldsHandler(event_handler=self, field_set_handler=field_set_handler, parent_type=self.parent_type)
+        field_set_handler.update_field_handler(field_handler)
+        
+        self.field_handler = field_handler
+        self.field_set_handler = field_set_handler
+        
+        return self.field_handler, self.field_set_handler
+    
+    def update_access_token(self, api_key):
+        ui.notify(f'Setting Access Token')
+        self.api_client.set_bearer_token(api_key)
+    
     def set_custom_field_cards(self, field_cards: list):
         self.custom_field_cards = field_cards
 
@@ -62,24 +78,22 @@ class EventHandler:
             self.deselect_all_cards()
         
         if e.key == 'd' and self.ctrl_down and e.action.keydown:
-            self.toggle_display_deleted()            
+            self.toggle_display_deleted()   
+                     
     def handle_card_click(self, custom_field_card):
-
         # Save the previous clicked card before updating
         last_card = self.last_card_clicked  # Store the old value before updating
         last_cards_position = last_card.display_order if last_card else None  # Correctly reference the last position
 
         # Update the last clicked card and timestamp
-        self.last_card_click_timestamp = time.time()
         self.last_card_clicked = custom_field_card  # Now update with the new clicked card
 
         # Deselect all if no modifier keys are held
         if not self.ctrl_down and not self.shift_down:
-            print("Deselecting all")
+            # print("Deselecting all")
             self.deselect_all_cards()
 
         # If Shift is held and a previous card exists, select the range
-        print(last_cards_position)
         if self.shift_down and last_cards_position is not None:
             current_card_position = custom_field_card.display_order
             if last_cards_position != current_card_position:  # Ensure it's a different card
@@ -88,7 +102,7 @@ class EventHandler:
 
     def select_cards_from_range(self, valid_range):
         for card in self.custom_field_cards:
-            print(card.display_order)
+            # print(card.display_order)
             if card.display_order in valid_range:
                 card.select_card()
 
@@ -101,15 +115,47 @@ class EventHandler:
     
     def toggle_display_deleted(self):
         app.storage.tab["display_deleted"] = not app.storage.tab.get("display_deleted", False)
-    
-    def toggle_deleted_field_visibility(self, value):
-        for card in self.custom_field_cards:
-            if card.deleted:
-                card.set_visibility(value)
-                
-    def parent_type_changed(self, new_parent_type):
-        ui.notify(f'Parent type set to: {new_parent_type}')
+                    
+    async def toggle_parent_type(self):
+        self.parent_type= "contact" if self.parent_type == "matter" else "matter"
+        await self.field_handler.load_from_storage()
         
+class CustomFields:
+    def __init__(self, field_data, event_handler: EventHandler, field_handler):
+        self.event_handler = event_handler
+        self.field_handler = field_handler
+        self.field_data = field_data
+
+class CustomField(ui.card):
+    def __init__(self, field_data={}, event_handler: EventHandler = None, field_handler=None):
+        super().__init__()
+        self.event_handler = event_handler
+        self.field_handler = field_handler
+        self.field_data = field_data
+        self.selected = False
+
+        self.id = field_data.get("id")
+        self.name = "Test" #field_data.get("name")
+        self.parent_type = field_data.get("parent_type")
+        self.display_order = 0 # field_data.get("display_order")
+        self.deleted = field_data.get("deleted")
+
+        # Full height and centered content
+        # with self.tight().style('width: 100%; justify-content: space-between; align-items: center; cursor: pointer; transition: background-color 0.3s; padding: 5px;'):
+        with self.tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;'):
+            with ui.context_menu():
+                ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before", self.parent_type))
+                ui.menu_item('Insert Below', lambda: self.field_handler.move_selected_cards(self.id, "after", self.parent_type))
+                
+                
+            with ui.row().style('width: 100%; justify-content: space-between;'):
+                with ui.column():
+                    self.name_label = ui.label().bind_text_from(self, 'name').style('font-size: 1.3em; font-weight: bold; color: #333;')
+                with ui.column():
+                    with ui.row():
+                        ui.label('Display Order:').style('font-size: 1.3em; font-weight: bold; color: #333;')
+                        ui.label().bind_text_from(self, 'display_order').style('font-size: 1.3em; font-weight: bold; color: #333;')  # Ensure position updates in UI
+
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
 
@@ -119,7 +165,7 @@ class CustomFieldCard:
         self.event_handler = event_handler
         self.field_handler = field_handler
         self.field_data = field_data
-        self.selected = False  # Track whether a card is selected
+        self.selected = False 
 
         # Create a card with default styles
         self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
@@ -127,12 +173,15 @@ class CustomFieldCard:
         # Bind name and position dynamically from field data
         self.id = field_data["id"]
         self.name = field_data["name"]
-        self.parent_type = field_data.get("parent_type")
-        self.display_order = field_data["display_order"]  # Ensure position updates dynamically
+        self.parent_type = field_data.get("parent_type", "").lower()
+        self.display_order = field_data["display_order"]
         self.deleted = field_data["deleted"]
         
+        self.label_style = 'font-size: 1.3em; font-weight: bold; color: #333;'
+        self.labels = []
         if self.deleted:
             self.name += (": (Deleted)")
+            self.card.bind_visibility_from(app.storage.tab, 'display_deleted')
             
         with self.card:
             with ui.context_menu():
@@ -142,22 +191,20 @@ class CustomFieldCard:
                 
             with ui.row().style('width: 100%; justify-content: space-between;'):
                 with ui.column():
-                    self.name_label = ui.label().bind_text_from(self, 'name').style(
-                        'font-size: 1.3em; font-weight: bold; color: #333;'
-                    )
+                    self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style)
+                    self.labels.append(self.name_label)
                 with ui.column():
                     with ui.row():
-                        ui.label('Display Order:').style('font-weight: bold;')
-                        ui.label().bind_text_from(self, 'display_order')  # Ensure position updates in UI
+                        self.labels.append(ui.label('Display Order:').style('font-weight: bold;'))
+                        self.labels.append(ui.label().bind_text_from(self, 'display_order'))  # Ensure position updates in UI
 
         # Add click event for selection
         self.card.on('click', self.on_click)
     
     def on_click(self, e: KeyEventArguments):
+        
         """Toggle selection state and update styling."""
         self.event_handler.handle_card_click(self)
-        print("card clicked")
-        print(time.time())
         if self.selected:
             self.deselect_card()
         else:
@@ -167,15 +214,11 @@ class CustomFieldCard:
         """Select this card and update its background color."""
         self.selected = True
         self.card.style('background-color: lightblue;')  # Highlight the card
-        # ui.notify(f'{self.field_data["name"]} Selected')
-        # logging.debug(f"Card '{self.field_data['name']}' selected.")
 
     def deselect_card(self):
         """Deselect this card and remove highlight."""
         self.selected = False
         self.card.style('background-color: white;')  # Remove highlight
-        # ui.notify(f'{self.field_data["name"]} Deselected')
-        # logging.debug(f"Card '{self.field_data['name']}' deselected.")
 
     def update_visibility(self, search_text):
         """Toggle visibility based on filter input."""
@@ -195,11 +238,14 @@ class CustomFieldSetCard:
         self.field_set_data = field_set_data
         self.id = field_set_data["id"]
         self.name = field_set_data["name"]
-        self.parent_type = field_set_data.get("parent_type")
+        self.parent_type = field_set_data.get("parent_type","").lower()
         self.custom_fields = field_set_data["custom_fields"]  # [{'id': 111}, {'id': 222}, ...]
-
+        self.selected = False
+        self.name_label = None
+        self.updating_name = False
+        
         # Lookup full custom field data from global storage
-        all_fields = app.storage.general['custom_fields']
+        all_fields = app.storage.general['custom_fields'][self.parent_type]
         custom_field_map = {field["id"]: field for field in all_fields if not field.get('deleted', False)}
 
         # Filter to get only associated fields, fully populated
@@ -213,20 +259,34 @@ class CustomFieldSetCard:
         self.custom_field_data.sort(key=lambda f: f['display_order'])
 
         # Card Layout
-        self.card = ui.card().classes('w-full justify-center border border-gray-300 rounded-md !bg-white')
-
+        self.card = ui.card().tight().classes('justify-center border border-gray-300 rounded-md').style('width: 100%; cursor: pointer; padding: 5px;')
 
         self.reorder_custom_fields()  # initial layout call
 
+    def update_name(self, new_name):
+        self.name = new_name
+        self.updating_name = False
+        
+    def selection_toggle(self):
+        if not self.selected:
+            self.selected = True
+            self.name_label.style('background-color: lightblue;')
+            
+        else:
+            self.selected = False
+            self.name_label.style('background-color: lightgray;')
+        
+    def toggle_name_changing(self):
+        self.updating_name = True if not self.updating_name else False
+        
     #This needs to be redone to reorder the element index in the layout rather than clearing and regenerating
     @ui.refreshable
     def reorder_custom_fields(self):
-        # 🔄 Re-fetch the latest field info from storage
-        all_fields = app.storage.general['custom_fields']
+
+        all_fields = app.storage.general['custom_fields'][self.parent_type]
         custom_field_map = {
             field['id']: field
             for field in all_fields
-            # if not field.get('deleted', False)
         }
 
         # Reconstruct custom_field_data from current storage
@@ -239,12 +299,18 @@ class CustomFieldSetCard:
         # Sort by updated display_order
         self.custom_field_data.sort(key=lambda f: f['display_order'])
 
-        # 🔄 Clear and regenerate the grid UI
         self.card.clear()
         with self.card:
             # Header label
-            ui.label(self.name).classes('text-xl font-bold w-full text-center border border-gray-300 bg-gray-100 rounded px-2 py-1')
-
+            name_change = ui.input(value=self.name).bind_visibility_from(self, 'updating_name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: lightgray;').props('input-class="text-center"')
+            name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
+            name_change.on('keydown.escape', self.toggle_name_changing)
+            
+            self.name_label = ui.label().bind_text_from(self, 'name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: whitesmoke;')
+            self.name_label.bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
+            self.name_label.on('dblclick', self.toggle_name_changing)
+            self.name_label.on('click', self.selection_toggle)
+            
             with ui.grid(columns=2).classes('w-full gap-3'):
                 for field in self.custom_field_data:
                     label = ui.label(field['name']).classes(
@@ -253,37 +319,55 @@ class CustomFieldSetCard:
                         'display: flex; align-items: center; justify-content: center; height: 100%;'
                     )
 
-                    # ✅ Bind visibility only if the field is deleted
                     if field.get('deleted', False):
                         label.bind_visibility_from(app.storage.tab, 'display_deleted')
 
 class CustomFieldSetsHandler:
-    def __init__(self, field_handler=None):
-        self.layout = None
+    def __init__(self, event_handler=None, field_handler = None, parent_type:str = None):
+        self.event_handler:EventHandler = event_handler
         self.field_handler = field_handler
+        self.parent_type = parent_type
+        
+        self.layout = None
         
     def load(self):
         if not self.layout:
-            self.layout = ui.column().style('width: 100%; padding: 20px;')
+            self.layout = ui.column().style('width: 100%;')
+            
         with self.layout:
-            for field_set in app.storage.general['custom_field_sets']:
+            for field_set in app.storage.general['custom_field_sets'][self.parent_type]:
                 app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
 
     def update_field_handler(self, new_handler):
         self.field_handler = new_handler
+        
+    def update_parent_type(self, new_parent_type):
+        self.parent_type = new_parent_type
         
     def update_field_sets(self) -> None:
         app.storage.tab['field_set_cards'].clear()
         self.layout.clear()
         app.storage.tab['field_set_cards'] = []
         with self.layout:
-            for field_set in app.storage.general['custom_field_sets']:
+            print(app.storage.general['custom_field_sets'][self.parent_type])
+            for field_set in app.storage.general['custom_field_sets'][self.parent_type]:
                 app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
 
-    async def load_from_api(self, parent_type="matter", client:Client=None):
-        response = await run.io_bound(get_custom_field_sets, client, parent_type)
+    async def load_from_storage(self, parent_type="matter"):
+        parent_type = self.event_handler.parent_type
+        if parent_type != self.parent_type:
+            self.parent_type = parent_type
+        
+        self.update_field_sets()
+        
+    async def load_from_api(self, parent_type="matter"):
+        parent_type = self.event_handler.parent_type
+        if parent_type != self.parent_type:
+            self.parent_type = parent_type
+            
+        response = await run.io_bound(get_custom_field_sets, self.event_handler.api_client, self.parent_type)
 
-        app.storage.general['custom_field_sets'] = response.get('data', [])
+        app.storage.general['custom_field_sets'][parent_type] = response.get('data', [])
         self.update_field_sets()
         
         if response:
@@ -292,9 +376,11 @@ class CustomFieldSetsHandler:
             return False
             
 class CustomFieldsHandler:
-    def __init__(self, event_handler, field_set_handler:CustomFieldSetsHandler=None):
+    def __init__(self, event_handler:EventHandler=None, field_set_handler:CustomFieldSetsHandler=None, parent_type:str = None):
+        
         self.event_handler:EventHandler = event_handler
         self.field_set_handler:CustomFieldSetsHandler = field_set_handler
+        self.parent_type = parent_type
         self.layout = None
         
     def load(self):
@@ -302,7 +388,7 @@ class CustomFieldsHandler:
         
         with ui.column().classes('w-full'):
             with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
-                for custom_field in app.storage.general['custom_fields']:
+                for custom_field in app.storage.general['custom_fields'][self.parent_type]:
                     field = CustomFieldCard(custom_field, self.event_handler, self)
                     fields.append(field)
 
@@ -311,40 +397,58 @@ class CustomFieldsHandler:
     def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
         self.field_set_handler = new_handler
         
-    @ui.refreshable
     def update_fields(self) -> None:
-        # ui.notify("Refreshing Fields")
+
         custom_field_cards = app.storage.tab['fields']
-        field_data = app.storage.general['custom_fields']
+        field_data = app.storage.general['custom_fields'][self.parent_type]
         for card in custom_field_cards:
             new_index = card.display_order
             card.card.move(target_index=new_index)
             storage_index = next((i for i, d in enumerate(field_data) if d['id'] == card.id), -1)
-            app.storage.general['custom_fields'][storage_index]['display_order'] = new_index
+            app.storage.general['custom_fields'][self.parent_type][storage_index]['display_order'] = new_index
             
     def clear_and_refresh(self):
         fields:list = app.storage.tab['fields']
         fields.clear()
         self.layout.clear()
         with self.layout:
-            for custom_field in app.storage.general['custom_fields']:
+            for custom_field in app.storage.general['custom_fields'][self.parent_type]:
                 field = CustomFieldCard(custom_field, self.event_handler, self)
                 fields.append(field)
 
             self.event_handler.set_custom_field_cards(fields)
 
-    async def load_from_api(self, parent_type="matter", client:Client=None):
-        parent_type = app.storage.tab['visible_parent_type']
+    async def load_from_storage(self):
+        parent_type = self.event_handler.parent_type
+        if parent_type != self.parent_type:
+            self.parent_type = parent_type
+            self.field_set_handler.update_parent_type(parent_type)
 
-        response = await run.io_bound(get_custom_fields, client, parent_type)
+        self.clear_and_refresh()
+        self.update_fields()
+
+        if self.field_set_handler:
+            ui.notify("Field set handler test")
+            await self.field_set_handler.load_from_storage()
+        
+        app.storage.general['parent_type'] = parent_type
+
+    async def load_from_api(self):
+        parent_type = self.event_handler.parent_type
+        if parent_type != self.parent_type:
+            self.parent_type = parent_type
+            self.field_set_handler.update_parent_type(parent_type)
+        
+        response = await run.io_bound(get_custom_fields, self.event_handler.api_client, parent_type)
         print(response)
         data = response.get('data', [])
         data = sorted(data, key=lambda x: x['display_order'])
-        app.storage.general['custom_fields'] = data
+        app.storage.general['custom_fields'][self.parent_type] = data
         self.clear_and_refresh()
 
         if self.field_set_handler:
-            await self.field_set_handler.load_from_api(parent_type, client)
+            ui.notify("Field set handler test")
+            await self.field_set_handler.load_from_api(parent_type=self.parent_type)
         app.storage.general['parent_type'] = parent_type
         
         if response:
@@ -355,13 +459,13 @@ class CustomFieldsHandler:
     #Replace with API patch call    
     def log_display_order_change(self, item_id, new_order):
         ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")        
-        return True  # Simulate a successful result
+        return True
     
     def update_position(self, item_id, new_order):
         ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")
-        update_custom_field_display_order(app.storage.tab['api_client'], item_id, new_order)
+        update_custom_field_display_order(self.event_handler.api_client, item_id, new_order)
         
-        return True  # Simulate a successful result
+        return True
 
     def move_item(self, moving_id, target_id, position, on_display_order_change):
         cards = app.storage.tab['fields']
