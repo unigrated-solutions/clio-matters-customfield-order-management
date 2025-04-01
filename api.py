@@ -58,3 +58,13 @@ def get_custom_field_sets(client:Client=None, parent_type="Matter"):
     
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
+
+def update_custom_field_set_label(client, fieldset_id, new_name):
+    try:
+        response = client.patch.custom_field_sets(id=fieldset_id, fields="name", name=new_name)
+        print(response)
+        logging.debug(json.dumps(response, indent=2))
+        return {"Success": True}
+    
+    except Exception as e:
+        logging.debug(f"An error occurred: {e}")

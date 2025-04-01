@@ -233,9 +233,11 @@ class CustomFieldCard:
         self.display_order = new_position
 
 class CustomFieldSetCard:
-    def __init__(self, field_set_data):
+    def __init__(self, field_set_data, event_handler):
         """Initialize the custom field set card with data."""
         self.field_set_data = field_set_data
+        self.event_handler:EventHandler = event_handler
+        
         self.id = field_set_data["id"]
         self.name = field_set_data["name"]
         self.parent_type = field_set_data.get("parent_type","").lower()
@@ -264,6 +266,7 @@ class CustomFieldSetCard:
         self.reorder_custom_fields()  # initial layout call
 
     def update_name(self, new_name):
+        update_custom_field_set_label(self.event_handler.api_client, self.id, new_name)
         self.name = new_name
         self.updating_name = False
         
@@ -336,7 +339,7 @@ class CustomFieldSetsHandler:
             
         with self.layout:
             for field_set in app.storage.general['custom_field_sets'][self.parent_type]:
-                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set))
+                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
 
     def update_field_handler(self, new_handler):
         self.field_handler = new_handler
