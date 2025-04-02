@@ -32,6 +32,9 @@ class EventHandler:
 
         self.last_card_clicked = None
         self.last_card_click_timestamp = 0
+        
+        self.is_editing_field = False
+        self.editing_field = None
 
     def init_handlers(self):
         field_set_handler = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
@@ -75,7 +78,7 @@ class EventHandler:
                 # ui.notify('Control Up')
 
         if e.key == "Escape":
-            self.deselect_all_cards()
+            self.deselect_all_fields()
         
         if e.key == 'd' and self.ctrl_down and e.action.keydown:
             self.toggle_display_deleted()   
@@ -91,7 +94,7 @@ class EventHandler:
         # Deselect all if no modifier keys are held
         if not self.ctrl_down and not self.shift_down:
             # print("Deselecting all")
-            self.deselect_all_cards()
+            self.deselect_all_fields()
 
         # If Shift is held and a previous card exists, select the range
         if self.shift_down and last_cards_position is not None:
@@ -106,7 +109,7 @@ class EventHandler:
             if card.display_order in valid_range:
                 card.select_card()
 
-    def deselect_all_cards(self):
+    def deselect_all_fields(self):
         for card in self.custom_field_cards:
             card.deselect_card()
     
@@ -166,7 +169,8 @@ class CustomFieldCard:
         self.field_handler = field_handler
         self.field_data = field_data
         self.selected = False 
-
+        self.updating_name = False
+        
         # Create a card with default styles
         self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
 
@@ -179,6 +183,10 @@ class CustomFieldCard:
         
         self.label_style = 'font-size: 1.3em; font-weight: bold; color: #333;'
         self.labels = []
+        
+        self.name_change = None
+        self.last_click= time.time()
+        
         if self.deleted:
             self.name += (": (Deleted)")
             self.card.bind_visibility_from(app.storage.tab, 'display_deleted')
@@ -191,8 +199,13 @@ class CustomFieldCard:
                 
             with ui.row().style('width: 100%; justify-content: space-between;'):
                 with ui.column():
-                    self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style)
+                    self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style).bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
                     self.labels.append(self.name_label)
+                    
+                    self.name_change = ui.input(value=self.name).props('v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').style(self.label_style)
+                    self.name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
+                    self.name_change.on('keydown.escape', self.toggle_name_changing)
+                
                 with ui.column():
                     with ui.row():
                         self.labels.append(ui.label('Display Order:').style('font-weight: bold;'))
@@ -200,10 +213,12 @@ class CustomFieldCard:
 
         # Add click event for selection
         self.card.on('click', self.on_click)
+        self.card.on('dblclick', self.toggle_name_changing)
     
     def on_click(self, e: KeyEventArguments):
         
         """Toggle selection state and update styling."""
+        self.last_click = time.time()
         self.event_handler.handle_card_click(self)
         if self.selected:
             self.deselect_card()
@@ -214,12 +229,14 @@ class CustomFieldCard:
         """Select this card and update its background color."""
         self.selected = True
         self.card.style('background-color: lightblue;')  # Highlight the card
-
+        
     def deselect_card(self):
         """Deselect this card and remove highlight."""
         self.selected = False
         self.card.style('background-color: white;')  # Remove highlight
-
+        if time.time() > self.last_click + .2:
+            self.updating_name= False
+        
     def update_visibility(self, search_text):
         """Toggle visibility based on filter input."""
         self.card.visible = search_text.lower() in self.field_data["name"].lower()
@@ -232,6 +249,17 @@ class CustomFieldCard:
         """Update the card's current position dynamically."""
         self.display_order = new_position
 
+    def toggle_name_changing(self):
+        self.updating_name = True if not self.updating_name else False
+        if self.updating_name:
+            self.select_card()
+        
+    def update_name(self, new_name):
+        update_custom_field_label(self.event_handler.api_client, self.id, new_name)
+        self.field_data['name'] = new_name
+        self.name = new_name
+        self.updating_name = False
+        
 class CustomFieldSetCard:
     def __init__(self, field_set_data, event_handler):
         """Initialize the custom field set card with data."""
@@ -267,6 +295,7 @@ class CustomFieldSetCard:
 
     def update_name(self, new_name):
         update_custom_field_set_label(self.event_handler.api_client, self.id, new_name)
+        self.field_set_data['name'] = new_name
         self.name = new_name
         self.updating_name = False
         
@@ -277,7 +306,7 @@ class CustomFieldSetCard:
             
         else:
             self.selected = False
-            self.name_label.style('background-color: lightgray;')
+            self.name_label.style('background-color: whitesmoke;')
         
     def toggle_name_changing(self):
         self.updating_name = True if not self.updating_name else False
@@ -305,7 +334,7 @@ class CustomFieldSetCard:
         self.card.clear()
         with self.card:
             # Header label
-            name_change = ui.input(value=self.name).bind_visibility_from(self, 'updating_name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: lightgray;').props('input-class="text-center"')
+            name_change = ui.input(value=self.name).props('v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: lightgray;').props('input-class="text-center"')
             name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
             name_change.on('keydown.escape', self.toggle_name_changing)
             
@@ -570,4 +599,4 @@ class CustomFieldsHandler:
         if self.field_set_handler:
             self.field_set_handler.update_field_sets()
         
-        self.event_handler.deselect_all_cards()
+        self.event_handler.deselect_all_fields()

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import time
 import logging
+import secrets
+from urllib.parse import urlencode
 
 from nicegui import ui, app
 
@@ -13,6 +15,57 @@ async def copy(selected_token):
     ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
     ui.notify('Copied to clipboard')
 
+# async def create_access_token():
+    
+#     def link_dialog(target):
+#         with ui.dialog() as dialog,ui.card().style('width: 1440px; max-width: none; height: 810px;'):
+#             with ui.element('q-toolbar'):
+#                 with ui.element('q-toolbar-title'):
+#                     ui.label('pop window')
+#                 ui.button(icon='close',on_click=dialog.close).props('flat round dense')
+#             with ui.element('q-card-section').classes('w-full h-full'):
+#                 with ui.element('iframe').classes('w-full h-full'):
+#                     ui.navigate.to(target)
+#         return dialog
+
+#     """Fetch client ID, store credentials with state, and open the OAuth URL in a new tab."""
+
+#     # client_id = selected_row.get("client_id")
+#     # client_secret = selected_row.get("client_secret")
+    
+#     client_id = "123"
+#     client_secret = "123"
+
+#     if not client_id or not client_secret:
+#         ui.notify("Client ID or Client Secret is missing!", type="warning")
+#         return
+
+#     # Generate a random state token
+#     state = secrets.token_urlsafe(16)
+#     timestamp = time.time()
+
+#     # Store state, timestamp, client ID, and client secret in storage
+#     app.storage.general[f"oauth_state_{state}"] = {
+#         "timestamp": timestamp,
+#         "client_id": client_id,
+#         "client_secret": client_secret,
+#     }
+
+#     # Construct the OAuth URL
+#     params = {
+#         "response_type": "code",
+#         "client_id": client_id,
+#         "redirect_uri": REDIRECT_URI,
+#         "state": state
+#     }
+#     auth_url = f"{AUTH_BASE_URL}?{urlencode(params)}"
+#     print(auth_url)
+#     link_dialog(auth_url).open()
+
+@ui.page("/new_tab")
+async def new_tab():
+    ui.label('New Tab')
+    
 @ui.page("/")
 async def main_page():
     
@@ -49,10 +102,20 @@ async def main_page():
         if event_handler.parent_type == "contact":
             matter_contact_button.set_text("Switch to Contact custom fields")
     
-    with ui.header(elevated=True).style('background-color: #3874c8; padding: 10px 10px;').classes('items-center justify-between'):
+    with ui.header(elevated=True).style('background-color: #3874c8; padding: 1px 10px;').classes('items-center justify-between'):
         with ui.row():
-            ui.label().bind_text_from(event_handler, 'parent_type').style('font-size: 1.5em; font-weight: bold; color: white; text-transform: capitalize;')
+            with ui.row().classes('w-full items-center'):
+                result = ui.label().classes('mr-auto')
+                with ui.button(icon='menu').style('height: 60px;'):
+                    with ui.menu() as menu:
+                        # ui.menu_item('Create Access Token', create_access_token)
+                        ui.menu_item('Create Access Token').set_enabled(False)
+                        ui.separator()
+                        ui.menu_item('Close', app.shutdown)
 
+            parent_type_label = ui.label().bind_text_from(event_handler, 'parent_type').style('font-size: 1.5em; font-weight: bold; color: white; text-transform: capitalize;')
+            parent_type_label.set_visibility(False)
+            
         with ui.row():
             save_button = ui.button(icon='save').style('height: 50px;')
             access_token = ui.input(
@@ -81,12 +144,12 @@ async def main_page():
         
         if app.storage.general.get('parent_type', "") == "contact":
             matter_contact_button.set_text("Switch to Matter custom fields")
-
+            
     with ui.row().style('width: 100%; height: calc(100vh - 120px); display: flex;') as page_container:
-        page_container.on('dblclick', event_handler.deselect_all_cards)
+        page_container.on('dblclick', event_handler.deselect_all_fields)
         
         # Scroll Area for Custom Field Sets
-        with ui.scroll_area().style('flex: 1; height: 100%; padding: 0; margin: 0;'):
+        with ui.scroll_area().style('flex: 1; height: 100%; padding: 0; margin: 0; background-color: WhiteSmoke;'):
             field_set_handler.load()
             
         with ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;'):
