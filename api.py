@@ -116,7 +116,7 @@ def get_custom_fields(client:Client=None, parent_type="matter"):
     # ui.notify(client)
     try:
         response = {"Success": True}
-        response = client.all.custom_fields(fields="id,name,display_order,deleted, parent_type", parent_type=parent_type)
+        response = client.all.custom_fields(fields="all", parent_type=parent_type)
         logging.debug(json.dumps(response, indent=2))
         return response
     
@@ -135,16 +135,16 @@ def get_custom_field_sets(client:Client=None, parent_type="Matter"):
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
 
-def update_custom_field_label(client, fieldset_id, new_name):
+def update_custom_field(client, field_id, **kwargs):
     try:
-        response = client.patch.custom_fields(id=fieldset_id, fields="name", name=new_name)
+        response = client.patch.custom_fields(id=field_id, fields="all", **kwargs)
         print(response)
         logging.debug(json.dumps(response, indent=2))
-        ui.notify(f"Successfully to field label to: {new_name}")
-        return {"Success": True}
+        return True
     
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
+        return False
         
 def update_custom_field_set_label(client, fieldset_id, new_name):
     try:
@@ -152,6 +152,17 @@ def update_custom_field_set_label(client, fieldset_id, new_name):
         print(response)
         logging.debug(json.dumps(response, indent=2))
         ui.notify(f"Successfully to field set label to: {new_name}")
+        return {"Success": True}
+    
+    except Exception as e:
+        logging.debug(f"An error occurred: {e}")
+        
+def delete_custom_field(client, field_id):
+    try:
+        response = client.delete.custom_fields(id=field_id)
+        print(response)
+        logging.debug(json.dumps(response, indent=2))
+        ui.notify(f"Successfully deleted: {field_id}")
         return {"Success": True}
     
     except Exception as e:

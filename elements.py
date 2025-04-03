@@ -16,6 +16,112 @@ def generate_selection_range(number1, number2):
         return range(number1 - 1, number2, -1)  # Excludes both ends
     return []  # If both numbers are the same, return an empty range
 
+
+async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
+    def key_press(e: KeyEventArguments):
+        if e['key'] == 'Enter':
+            dialog.submit(True)
+        elif e['key'] == 'Escape':
+            dialog.submit(False)
+            
+    with ui.dialog() as dialog, ui.card():
+        ui.label(message).classes('text-lg').style('white-space: pre-line')
+
+        with ui.row().classes('justify-end'):
+            ui.button('Cancel', on_click=lambda: dialog.submit(False)).props('flat')
+            ui.button('Confirm', on_click=lambda: dialog.submit(True)).props('color=primary')
+
+        # Handle keyboard shortcuts
+        dialog.on('keydown', lambda e: key_press(e.args))
+
+    dialog.open()
+    result = await dialog
+    return result
+
+class ExpandableRightDrawer(ui.right_drawer):
+    def __init__(self, event_handler):
+        super().__init__(bordered=True)
+        
+        self.event_handler = event_handler
+        self.expanded = False  # track the state
+
+        # Create the drawer
+        with self.props('width=50').style(self.get_drawer_style()):
+            
+            self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
+            with self.toggle_row:
+                self.toggle_button = ui.button(on_click=self.toggle).style('''
+                    width: 40px;
+                    height: 40px;
+                    min-width: 40px;
+                    padding: 0;
+                    margin: 0;
+                ''')
+                ui.separator()
+                self.update_button_icon()
+                
+                
+            with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
+
+                self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
+                    font-weight: bold;
+                    color: white;
+                    text-transform: capitalize;
+                    background-color: #1976d2;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                ''')
+                                
+                with self.parent_type_menu:
+                    with ui.menu():
+                        ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
+                        ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
+    
+                # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
+    
+    async def set_parent_type(self, type):
+        await self.event_handler.set_parent_type(type)
+        self.parent_type_menu.set_text(f'{self.event_handler.parent_type.capitalize()} Custom Fields')
+        
+    def get_drawer_style(self) -> str:
+        if self.expanded:
+            return '''
+                transition: width 0.3s ease;
+                padding-top: 12px;
+                padding-left: 12px;
+                padding-right: 12px;
+                align-items: center;
+            '''
+        else:
+            return '''
+                transition: width 0.3s ease;
+                padding-top: 12px;
+                padding-left: 0px;
+                padding-right: 0px;
+            '''
+        
+    def get_toggle_row_style(self) -> str:
+        return '''
+            justify-content: flex-start;
+        ''' if self.expanded else '''
+            justify-content: center;
+        '''
+        
+    def toggle(self):
+        self.expanded = not self.expanded
+
+        # Update width using props (the last one wins)
+        new_width = '300' if self.expanded else '50'
+        self.props(f'width={new_width}').style(self.get_drawer_style())
+
+        # Update toggle row alignment
+        self.toggle_row.style(self.get_toggle_row_style())
+
+        self.update_button_icon()
+
+    def update_button_icon(self):
+        self.toggle_button.props(f"icon={'chevron_right' if self.expanded else 'chevron_left'}")
+
 class EventHandler:
     def __init__(self, parent_type):
         
@@ -59,7 +165,7 @@ class EventHandler:
     def set_ctrl(self, position: bool):
         self.ctrl_down = position
 
-    def handle_key(self, e: KeyEventArguments):
+    async def handle_key(self, e: KeyEventArguments):
         # print(e.key)
         if e.key == 'Shift':
             if e.action.keydown:
@@ -83,6 +189,9 @@ class EventHandler:
         if e.key == 'd' and self.ctrl_down and e.action.keydown:
             self.toggle_display_deleted()   
                      
+        if e.key == 'Delete' and e.action.keydown:
+            await self.field_handler.delete_custom_fields()
+            
     def handle_card_click(self, custom_field_card):
         # Save the previous clicked card before updating
         last_card = self.last_card_clicked  # Store the old value before updating
@@ -121,6 +230,10 @@ class EventHandler:
                     
     async def toggle_parent_type(self):
         self.parent_type= "contact" if self.parent_type == "matter" else "matter"
+        await self.field_handler.load_from_storage()
+
+    async def set_parent_type(self, type):
+        self.parent_type= type
         await self.field_handler.load_from_storage()
         
 class CustomFields:
@@ -170,22 +283,27 @@ class CustomFieldCard:
         self.field_data = field_data
         self.selected = False 
         self.updating_name = False
+        self.updating = False
         
-        # Create a card with default styles
-        self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
-
+        self.name_change = None
+        self.last_click= time.time()
+        
         # Bind name and position dynamically from field data
         self.id = field_data["id"]
         self.name = field_data["name"]
         self.parent_type = field_data.get("parent_type", "").lower()
         self.display_order = field_data["display_order"]
+        self.field_type = field_data['field_type']
+        self.displayed = field_data['displayed'] #Default in clio
+        self.required = field_data['required']
         self.deleted = field_data["deleted"]
+        
+        # Create a card with default styles
+        self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
+
         
         self.label_style = 'font-size: 1.3em; font-weight: bold; color: #333;'
         self.labels = []
-        
-        self.name_change = None
-        self.last_click= time.time()
         
         if self.deleted:
             self.name += (": (Deleted)")
@@ -195,9 +313,9 @@ class CustomFieldCard:
             with ui.context_menu():
                 ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before"))
                 ui.menu_item('Insert Below', lambda: self.field_handler.move_selected_cards(self.id, "after"))
+                ui.menu_item('Copy Id', self.copy_id).bind_visibility_from(self, 'selected')
                 
-                
-            with ui.row().style('width: 100%; justify-content: space-between;'):
+            with ui.row().style('width: 100%; justify-content: space-between; align-items: center;'):
                 with ui.column():
                     self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style).bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
                     self.labels.append(self.name_label)
@@ -206,15 +324,22 @@ class CustomFieldCard:
                     self.name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
                     self.name_change.on('keydown.escape', self.toggle_name_changing)
                 
-                with ui.column():
-                    with ui.row():
-                        self.labels.append(ui.label('Display Order:').style('font-weight: bold;'))
-                        self.labels.append(ui.label().bind_text_from(self, 'display_order'))  # Ensure position updates in UI
+            
+                with ui.row().style('align-items: center; gap: 16px;'):
+                    # Group 1: Checkboxes
+                    with ui.row().style('align-items: center; gap: 8px;'):
+                        ui.checkbox('Default', on_change= lambda e: self.update_default(e.sender.value) if not self.updating else None).bind_value_from(self, 'displayed')
+                        ui.checkbox('Required', on_change= lambda e: self.update_required(e.sender.value) if not self.updating else None).bind_value_from(self, 'required')
 
-        # Add click event for selection
+                    # Group 2: Position labels
+                    with ui.row().style('align-items: center; gap: 4px;'):
+                        self.labels.append(ui.label('Position:').style('font-weight: bold;'))
+                        self.labels.append(ui.label().bind_text_from(self, 'display_order'))
+                        # Add click event for selection
+        
         self.card.on('click', self.on_click)
         self.card.on('dblclick', self.toggle_name_changing)
-    
+                    
     def on_click(self, e: KeyEventArguments):
         
         """Toggle selection state and update styling."""
@@ -224,6 +349,10 @@ class CustomFieldCard:
             self.deselect_card()
         else:
             self.select_card()
+            
+    async def copy_id(self):
+        ui.run_javascript(f'navigator.clipboard.writeText("{self.id}")')
+        ui.notify('Copied to clipboard')
     
     def select_card(self):
         """Select this card and update its background color."""
@@ -255,11 +384,33 @@ class CustomFieldCard:
             self.select_card()
         
     def update_name(self, new_name):
-        update_custom_field_label(self.event_handler.api_client, self.id, new_name)
-        self.field_data['name'] = new_name
-        self.name = new_name
-        self.updating_name = False
-        
+        success = update_custom_field(self.event_handler.api_client, self.id, name=new_name)
+        if success:
+            self.field_data['name'] = new_name
+            self.name = new_name
+            self.updating_name = False
+            ui.notify(f"Successfully updated Name: {new_name}")
+    
+    async def update_default(self, displayed):
+        if self.updating or self.displayed == displayed:
+            return
+        self.updating = True
+        success = update_custom_field(self.event_handler.api_client, self.id, displayed=displayed)
+        if success:
+            self.displayed = displayed
+            ui.notify(f"Successfully updated Default: {displayed}")
+        self.updating = False
+            
+    async def update_required(self, is_required):
+        if self.updating or self.required == is_required:
+            return
+        self.updating = True
+        success = update_custom_field(self.event_handler.api_client, self.id, required=is_required)
+        if success:
+            self.required = is_required
+            ui.notify(f"Successfully updated Required: {is_required}")
+        self.updating = False
+            
 class CustomFieldSetCard:
     def __init__(self, field_set_data, event_handler):
         """Initialize the custom field set card with data."""
@@ -289,7 +440,7 @@ class CustomFieldSetCard:
         self.custom_field_data.sort(key=lambda f: f['display_order'])
 
         # Card Layout
-        self.card = ui.card().tight().classes('justify-center border border-gray-300 rounded-md').style('width: 100%; cursor: pointer; padding: 5px;')
+        self.card = ui.card().tight().classes('justify-center border border-gray-300 rounded-md').style('width: 100%; padding: 5px;')
 
         self.reorder_custom_fields()  # initial layout call
 
@@ -338,7 +489,7 @@ class CustomFieldSetCard:
             name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
             name_change.on('keydown.escape', self.toggle_name_changing)
             
-            self.name_label = ui.label().bind_text_from(self, 'name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: whitesmoke;')
+            self.name_label = ui.label().bind_text_from(self, 'name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: whitesmoke; cursor: pointer')
             self.name_label.bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
             self.name_label.on('dblclick', self.toggle_name_changing)
             self.name_label.on('click', self.selection_toggle)
@@ -348,7 +499,7 @@ class CustomFieldSetCard:
                     label = ui.label(field['name']).classes(
                         'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
                     ).style(
-                        'display: flex; align-items: center; justify-content: center; height: 100%;'
+                        'display: flex; align-items: center; justify-content: center; height: 100%; cursor: pointer'
                     )
 
                     if field.get('deleted', False):
@@ -600,3 +751,20 @@ class CustomFieldsHandler:
             self.field_set_handler.update_field_sets()
         
         self.event_handler.deselect_all_fields()
+        
+    async def delete_custom_fields(self):
+        names = []
+        ids = []
+        
+        for card in app.storage.tab['fields']:
+            if card.selected:
+                names.append(card.name)
+                ids.append(card.id)
+        message = f'You are about to delete the following fields:\n{names}'
+        
+        if await confirm_dialog(message):
+            for id in ids:
+                delete_custom_field(self.event_handler.api_client, id)
+                ui.notify(f'Deleted: {id}')
+        else:
+            ui.notify("Cancelling deleting")

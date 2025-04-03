@@ -17,16 +17,16 @@ async def copy(selected_token):
 
 # async def create_access_token():
     
-#     def link_dialog(target):
-#         with ui.dialog() as dialog,ui.card().style('width: 1440px; max-width: none; height: 810px;'):
-#             with ui.element('q-toolbar'):
-#                 with ui.element('q-toolbar-title'):
-#                     ui.label('pop window')
-#                 ui.button(icon='close',on_click=dialog.close).props('flat round dense')
-#             with ui.element('q-card-section').classes('w-full h-full'):
-#                 with ui.element('iframe').classes('w-full h-full'):
-#                     ui.navigate.to(target)
-#         return dialog
+    # def link_dialog(target):
+    #     with ui.dialog() as dialog,ui.card().style('width: 1440px; max-width: none; height: 810px;'):
+    #         with ui.element('q-toolbar'):
+    #             with ui.element('q-toolbar-title'):
+    #                 ui.label('pop window')
+    #             ui.button(icon='close',on_click=dialog.close).props('flat round dense')
+    #         with ui.element('q-card-section').classes('w-full h-full'):
+    #             with ui.element('iframe').classes('w-full h-full'):
+    #                 ui.navigate.to(target)
+    #     return dialog
 
 #     """Fetch client ID, store credentials with state, and open the OAuth URL in a new tab."""
 
@@ -62,20 +62,22 @@ async def copy(selected_token):
 #     print(auth_url)
 #     link_dialog(auth_url).open()
 
-@ui.page("/new_tab")
-async def new_tab():
-    ui.label('New Tab')
-    
 @ui.page("/")
-async def main_page():
+async def new_tab():
+    ui.navigate.to(customfield_management_page)
+    
+@ui.page("/customfield_management")
+async def customfield_management_page():
     
     if not app.storage.general.get('custom_fields'):
         app.storage.general['custom_fields'] = {"matter": [], "contact": []}
         
     if not app.storage.general.get('custom_field_sets'):
         app.storage.general['custom_field_sets'] = {"matter": [], "contact": []}
-        
+    
+    ui.query('.nicegui-content').classes('p-0 m-0 gap-0')
     await ui.context.client.connected()
+    
     app.storage.tab['fields'] = []
     app.storage.tab['field_set_cards'] = []
     parent_type = app.storage.general.get('parent_type', "matter")
@@ -95,40 +97,38 @@ async def main_page():
         app.storage.general['access_token'] = token
         ui.notify("Access Token Saved")
     
-    async def update_matter_contact_button_text():
-        if event_handler.parent_type == "matter":
-            matter_contact_button.set_text("Switch to Matter custom fields")
+    # async def update_matter_contact_button_text():
+    #     if event_handler.parent_type == "matter":
+    #         matter_contact_button.set_text("Switch to Matter custom fields")
 
-        if event_handler.parent_type == "contact":
-            matter_contact_button.set_text("Switch to Contact custom fields")
+    #     if event_handler.parent_type == "contact":
+    #         matter_contact_button.set_text("Switch to Contact custom fields")
     
-    with ui.header(elevated=True).style('background-color: #3874c8; padding: 1px 10px;').classes('items-center justify-between'):
+    with ui.header(elevated=True).style('background-color: #3874c8; padding: 5px 2px;').classes('items-center justify-between'):
         with ui.row():
-            with ui.row().classes('w-full items-center'):
-                result = ui.label().classes('mr-auto')
-                with ui.button(icon='menu').style('height: 60px;'):
+            with ui.row().classes('w-full items-center').style('gap: 5px;') as menu_bar:
+                #App Menu
+                with ui.button(text="File").classes('text-white').props('flat').style('height: 30px; width: 60px; '):
                     with ui.menu() as menu:
                         # ui.menu_item('Create Access Token', create_access_token)
                         ui.menu_item('Create Access Token').set_enabled(False)
                         ui.separator()
                         ui.menu_item('Close', app.shutdown)
-
-            parent_type_label = ui.label().bind_text_from(event_handler, 'parent_type').style('font-size: 1.5em; font-weight: bold; color: white; text-transform: capitalize;')
-            parent_type_label.set_visibility(False)
-            
+                
+                #Tools
+                with ui.button(text="Tools").classes('text-white').props('flat').style('height: 30px; width: 60px;'):
+                    with ui.menu() as menu:
+                        # ui.menu_item('Create Access Token', create_access_token)
+                        ui.menu_item('Custom Field Management', on_click= lambda: ui.navigate.to(customfield_management_page))
         with ui.row():
-            save_button = ui.button(icon='save').style('height: 50px;')
             access_token = ui.input(
                 placeholder="Enter Access Token...",
                 password=True,
                 password_toggle_button=True
-            ).style(
-                'width: 500px; height: 50px; font-size: 1.25em; border-radius: 5px; '
-                'background-color: white; color: #333; padding-left: 12px; '
+            ).props('v-model="text" dense="dense" size=48').style(
+                'width: 250px; border-radius: 5px; '
+                'background-color: white; color: #333; padding-left: 12px;'
             )
-            copy_button = ui.button(icon="content_copy").style('height: 50px;')
-            copy_button.on('click', lambda: copy(access_token.value))
-            save_button.on('click', lambda: store_access_token(access_token.value) )
             
             if app.storage.general.get('access_token'):
                 access_token.set_value(app.storage.general['access_token'])
@@ -137,27 +137,35 @@ async def main_page():
             access_token.bind_value_to(app.storage.tab, 'api_key')
             access_token.on('change', lambda: event_handler.update_access_token(access_token.value))
             
-        matter_contact_button = ui.button('Switch to Contact custom fields')
-        matter_contact_button.on('click', event_handler.toggle_parent_type)
-        matter_contact_button.on('click', update_matter_contact_button_text)
-        
-        
-        if app.storage.general.get('parent_type', "") == "contact":
-            matter_contact_button.set_text("Switch to Matter custom fields")
             
-    with ui.row().style('width: 100%; height: calc(100vh - 120px); display: flex;') as page_container:
+            copy_button = ui.button(icon="content_copy").style('height: 35px; width: 35px;')
+            copy_button.on('click', lambda: copy(access_token.value))
+            save_button = ui.button(icon='save').style('height: 35px; width: 35px;')
+            save_button.on('click', lambda: store_access_token(access_token.value) )
+
+
+    ExpandableRightDrawer(event_handler=event_handler)
+    with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
         page_container.on('dblclick', event_handler.deselect_all_fields)
         
-        # Scroll Area for Custom Field Sets
-        with ui.scroll_area().style('flex: 1; height: 100%; padding: 0; margin: 0; background-color: WhiteSmoke;'):
-            field_set_handler.load()
-            
-        with ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;'):
-            pass
+
+        with ui.column().style('flex: 1; gap: 0; height: 100%; padding: 10; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke'):
+            ui.label('Field Sets').classes('w-full text-2xl bg-white font-bold border border-gray-300 p-2 rounded text-center')
+            # Scroll Area for Custom Field Sets
+            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
+                field_set_handler.load()
+                
+        ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;')
+
 
         # Right Section - Custom Fields
-        with ui.column().style('flex: 1; height: 100%; padding: 10; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke;'):
+        with ui.column().style('flex: 1; gap: 0; height: 100%; padding: 0; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke;'):
+            ui.label('Fields').classes('w-full text-2xl bg-white font-bold border border-gray-300 p-2 rounded text-center')
             
+            # Scroll area for cards
+            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
+                field_handler.load()
+                
             # Search box always visible
             with ui.column().style('width: 100%; background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
                 
@@ -168,20 +176,17 @@ async def main_page():
                         card.update_visibility(search_text)  # Update visibility
                     
                 # Input field for filtering
-                with ui.row().classes('w-full items-center justify-between'):
+                with ui.row().classes('w-full items-center justify-between').style('padding: 5px, 2px;'):
                     custom_field_filter = ui.input(placeholder="Filter fields by name...", on_change=filter_fields).style(
-                        'width: 300px; font-size: 1.5em; border-radius: 5px; '
-                        'border: 2px;'
-                    )
+                        'width: 300px;  border-radius: 5px; '
+                        'border: 2px; padding: 0;'
+                    ).props('v-model="text" dense="dense" size=32')
+                    
                     if not app.storage.tab.get('display_deleted'):
                         app.storage.tab['display_deleted'] = False
-                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab,'display_deleted')
+                        
+                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab,'display_deleted').props('dense')
                     toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
-                    # toggle_deleted_field.on_value_change(lambda e: event_handler.toggle_deleted_field_visibility(e.sender.value))
                     ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api())
-
-            # Scroll area for cards
-            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
-                field_handler.load()
 
 ui.run(storage_secret="CHANGEME", title= 'Custom Field Management', native=True , window_size=(1440,810), uvicorn_logging_level="debug")
