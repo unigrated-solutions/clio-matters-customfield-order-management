@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 async def copy(selected_token):
     ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
     ui.notify('Copied to clipboard')
-
+    
 # async def create_access_token():
     
     # def link_dialog(target):
@@ -83,7 +83,6 @@ async def customfield_management_page():
     parent_type = app.storage.general.get('parent_type', "matter")
     
     event_handler = EventHandler(parent_type)
-    field_handler, field_set_handler = event_handler.init_handlers()
 
     ui.add_body_html('''
         <script>
@@ -97,12 +96,8 @@ async def customfield_management_page():
         app.storage.general['access_token'] = token
         ui.notify("Access Token Saved")
     
-    # async def update_matter_contact_button_text():
-    #     if event_handler.parent_type == "matter":
-    #         matter_contact_button.set_text("Switch to Matter custom fields")
-
-    #     if event_handler.parent_type == "contact":
-    #         matter_contact_button.set_text("Switch to Contact custom fields")
+    def handle_field_creation(data: dict):
+        ui.notify(f"Field Created: {data['name']} ({data})")
     
     with ui.header(elevated=True).style('background-color: #3874c8; padding: 5px 2px;').classes('items-center justify-between'):
         with ui.row():
@@ -146,6 +141,7 @@ async def customfield_management_page():
 
     ExpandableRightDrawer(event_handler=event_handler)
     with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
+        field_handler, field_set_handler = event_handler.init_handlers(page_container)
         page_container.on('dblclick', event_handler.deselect_all_fields)
         
 

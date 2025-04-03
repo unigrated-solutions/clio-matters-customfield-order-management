@@ -8,13 +8,6 @@ from api import *
 
 logging.basicConfig(level=logging.DEBUG)
 
-def generate_selection_range(number1, number2):
-    """Generates a range excluding both number1 and number2."""
-    if number1 < number2:
-        return range(number1 + 1, number2)  # Excludes both ends
-    elif number1 > number2:
-        return range(number1 - 1, number2, -1)  # Excludes both ends
-    return []  # If both numbers are the same, return an empty range
 
 
 async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
@@ -37,7 +30,7 @@ async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
     dialog.open()
     result = await dialog
     return result
-
+    
 class ExpandableRightDrawer(ui.right_drawer):
     def __init__(self, event_handler):
         super().__init__(bordered=True)
@@ -125,6 +118,7 @@ class ExpandableRightDrawer(ui.right_drawer):
 class EventHandler:
     def __init__(self, parent_type):
         
+        self.page_container = None
         self.api_client = create_client_session()
         self.parent_type = parent_type
         self.field_handler = None
@@ -142,7 +136,9 @@ class EventHandler:
         self.is_editing_field = False
         self.editing_field = None
 
-    def init_handlers(self):
+        self.fields_selected_count = 0
+        
+    def init_handlers(self, page_container):
         field_set_handler = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
         field_handler = CustomFieldsHandler(event_handler=self, field_set_handler=field_set_handler, parent_type=self.parent_type)
         field_set_handler.update_field_handler(field_handler)
@@ -150,6 +146,7 @@ class EventHandler:
         self.field_handler = field_handler
         self.field_set_handler = field_set_handler
         
+        self.page_container = page_container
         return self.field_handler, self.field_set_handler
     
     def update_access_token(self, api_key):
@@ -185,32 +182,57 @@ class EventHandler:
 
         if e.key == "Escape":
             self.deselect_all_fields()
+            
+        # WARNING field will show as "deleted" in Clio's "modify order" tool
+        if e.key == 'Delete' and e.action.keydown:
+            await self.field_handler.delete_custom_fields()
         
         if e.key == 'd' and self.ctrl_down and e.action.keydown:
             self.toggle_display_deleted()   
-                     
-        if e.key == 'Delete' and e.action.keydown:
-            await self.field_handler.delete_custom_fields()
-            
+        
+        if e.key == 'n' and self.ctrl_down and e.action.keydown:
+            self.field_handler.create_custom_field_dialog()
+        
     def handle_card_click(self, custom_field_card):
+        
         # Save the previous clicked card before updating
-        last_card = self.last_card_clicked  # Store the old value before updating
-        last_cards_position = last_card.display_order if last_card else None  # Correctly reference the last position
-
+        last_card = self.last_card_clicked  
+        last_cards_position = last_card.display_order if last_card else None 
         # Update the last clicked card and timestamp
-        self.last_card_clicked = custom_field_card  # Now update with the new clicked card
+        self.last_card_clicked = custom_field_card
 
         # Deselect all if no modifier keys are held
-        if not self.ctrl_down and not self.shift_down:
+        if not self.ctrl_down and not self.shift_down and custom_field_card != last_card:
             # print("Deselecting all")
             self.deselect_all_fields()
-
+              
         # If Shift is held and a previous card exists, select the range
-        if self.shift_down and last_cards_position is not None:
+        elif self.shift_down and last_cards_position is not None:
             current_card_position = custom_field_card.display_order
             if last_cards_position != current_card_position:  # Ensure it's a different card
-                selection_range = generate_selection_range(last_cards_position, current_card_position)
+                selection_range = self.generate_selection_range(last_cards_position, current_card_position)
                 self.select_cards_from_range(selection_range)
+                self.increment_field_count()  
+
+        if custom_field_card == last_card:
+            self.decrement_field_count()
+            
+        else:
+            self.increment_field_count()            
+            
+    def increment_field_count(self):
+        self.fields_selected_count += 1
+        
+    def decrement_field_count(self):
+        self.fields_selected_count = max(0, self.fields_selected_count - 1)
+
+    def generate_selection_range(self,number1, number2):
+        """Generates a range excluding both number1 and number2."""
+        if number1 < number2:
+            return range(number1 + 1, number2)  # Excludes both ends
+        elif number1 > number2:
+            return range(number1 - 1, number2, -1)  # Excludes both ends
+        return []  # If both numbers are the same, return an empty range
 
     def select_cards_from_range(self, valid_range):
         for card in self.custom_field_cards:
@@ -222,6 +244,8 @@ class EventHandler:
         for card in self.custom_field_cards:
             card.deselect_card()
     
+        self.fields_selected_count = 0
+        
     def do_nothing(self):
         pass
     
@@ -311,10 +335,25 @@ class CustomFieldCard:
             
         with self.card:
             with ui.context_menu():
-                ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before"))
-                ui.menu_item('Insert Below', lambda: self.field_handler.move_selected_cards(self.id, "after"))
-                ui.menu_item('Copy Id', self.copy_id).bind_visibility_from(self, 'selected')
+                # Always Show
+                ui.menu_item('Copy Id', self.copy_id)
                 
+                # Only show these when more than one field is selected
+                ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before")) \
+                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
+                ui.menu_item("Insert Below", lambda: self.field_handler.move_selected_cards(self.id, "after")) \
+                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
+                
+                # Only show these when less than two field is selected
+                ui.menu_item("Duplicate", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order+1)) \
+                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
+                    )
+                ui.menu_item("Create Field Above", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order -1)) \
+                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
+                
+                ui.menu_item("Create Field Below", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order +1)) \
+                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
+                    
             with ui.row().style('width: 100%; justify-content: space-between; align-items: center;'):
                 with ui.column():
                     self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style).bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
@@ -337,19 +376,19 @@ class CustomFieldCard:
                         self.labels.append(ui.label().bind_text_from(self, 'display_order'))
                         # Add click event for selection
         
-        self.card.on('click', self.on_click)
+        self.card.on('click', lambda: self.on_click())
         self.card.on('dblclick', self.toggle_name_changing)
                     
-    def on_click(self, e: KeyEventArguments):
-        
-        """Toggle selection state and update styling."""
-        self.last_click = time.time()
+    async def on_click(self):
+        self.last_click = time.time()  # Move this up!
+
         self.event_handler.handle_card_click(self)
+
         if self.selected:
             self.deselect_card()
         else:
             self.select_card()
-            
+        
     async def copy_id(self):
         ui.run_javascript(f'navigator.clipboard.writeText("{self.id}")')
         ui.notify('Copied to clipboard')
@@ -768,3 +807,56 @@ class CustomFieldsHandler:
                 ui.notify(f'Deleted: {id}')
         else:
             ui.notify("Cancelling deleting")
+
+    def create_custom_field_dialog(self, display_order=None) -> dict:
+        field_types = [
+            "checkbox", "contact", "currency", "date", "time", "email",
+            "matter", "numeric", "picklist", "text_area", "text_line", "url"
+        ]
+
+        picklist_choices = ["Option A", "Option B", "Option C"]
+
+        
+        with ui.dialog() as create_dialog, ui.card():
+            ui.label('Create Custom Field').classes('w-full text-xl font-bold')
+
+            name_input = ui.input('Name').classes('w-full').props('dense')
+
+            field_type_input = ui.select(field_types, label='Field Type') \
+                .classes('w-full').props('dense')
+
+            picklist_dropdown = ui.select(picklist_choices, label='Picklist Options') \
+                .classes('w-full').props('dense')
+            picklist_dropdown.bind_visibility_from(field_type_input, 'value', value='picklist')
+
+            display_order_input = ui.input('Display Order (optional)').classes('w-full').props('dense')
+            if display_order is not None:
+                display_order_input.set_value(str(display_order))
+
+            default_checkbox = ui.checkbox('Default').props('dense')
+            required_checkbox = ui.checkbox('Required').props('dense')
+
+            with ui.row().classes('justify-end'):
+                ui.button('Cancel', on_click=lambda: create_dialog.submit(None)).props('flat')
+
+                def handle_submit():
+                    result = {
+                        'name': name_input.value,
+                        'field_type': field_type_input.value,
+                        'default': default_checkbox.value,
+                        'required': required_checkbox.value,
+                        'display_order': display_order_input.value or None,
+                    }
+                    if result['field_type'] == 'picklist':
+                        result['picklist_choice'] = picklist_dropdown.value
+                    create_dialog.submit(result)
+
+                ui.button('Create', on_click= lambda: handle_submit()).props('color=primary')
+        
+        return create_dialog
+        
+    async def show_field_creation_dialog(self, display_order=None):
+        with self.event_handler.page_container:
+            dialog=  self.create_custom_field_dialog(display_order)
+            result = await dialog
+            ui.notify(result)
