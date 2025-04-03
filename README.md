@@ -8,6 +8,6 @@ This is a **locally run web-based application** built with [NiceGUI](https://git
 - **Key Modifiers**: Ctrl and Shift
     - Can be used together while selecting fields
     - Selection based on last field clicked
-
+- Move selected fields by right clicking a target field and choose to insert above or below
     
 ![](screenshot.png)
