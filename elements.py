@@ -8,8 +8,6 @@ from api import *
 
 logging.basicConfig(level=logging.DEBUG)
 
-
-
 async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
     def key_press(e: KeyEventArguments):
         if e['key'] == 'Enter':
@@ -71,6 +69,7 @@ class ExpandableRightDrawer(ui.right_drawer):
                         ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
     
                 # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
+                ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
     
     async def set_parent_type(self, type):
         await self.event_handler.set_parent_type(type)
@@ -191,8 +190,16 @@ class EventHandler:
             self.toggle_display_deleted()   
         
         if e.key == 'n' and self.ctrl_down and e.action.keydown:
-            self.field_handler.create_custom_field_dialog()
+            await self.field_handler.show_field_creation_dialog()
+            
+        if e.key == 'F2' and e.action.keydown:
+            if self.fields_selected_count == 1:
+                self.last_card_clicked.toggle_name_changing()
         
+        else:
+            print(e.key)
+            print(self.fields_selected_count)
+            
     def handle_card_click(self, custom_field_card):
         
         # Save the previous clicked card before updating
@@ -214,7 +221,7 @@ class EventHandler:
                 self.select_cards_from_range(selection_range)
                 self.increment_field_count()  
 
-        if custom_field_card == last_card:
+        if custom_field_card == last_card and last_card.selected:
             self.decrement_field_count()
             
         else:
@@ -314,13 +321,17 @@ class CustomFieldCard:
         
         # Bind name and position dynamically from field data
         self.id = field_data["id"]
-        self.name = field_data["name"]
         self.parent_type = field_data.get("parent_type", "").lower()
-        self.display_order = field_data["display_order"]
+        self.name = field_data["name"]
         self.field_type = field_data['field_type']
         self.displayed = field_data['displayed'] #Default in clio
-        self.required = field_data['required']
         self.deleted = field_data["deleted"]
+        self.required = field_data['required']
+        self.display_order = field_data["display_order"]
+        if field_data.get('picklist_options'):
+            self.picklist_options = field_data['picklist_options']
+        else:
+            self.picklist_options = None
         
         # Create a card with default styles
         self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
@@ -345,13 +356,20 @@ class CustomFieldCard:
                     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
                 
                 # Only show these when less than two field is selected
-                ui.menu_item("Duplicate", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order+1)) \
-                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
+                ui.menu_item("Duplicate", on_click=self.duplicate_field) \
+                    .bind_visibility_from(
+                        self.event_handler,
+                        'fields_selected_count',
+                        backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
                     )
-                ui.menu_item("Create Field Above", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order -1)) \
+                # ui.menu_item("Copy", on_click=lambda: ui.notify(self.to_dict())) \
+                #     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
+                #     )
+                    
+                ui.menu_item("Create Field Above", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order -1)) \
                     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
                 
-                ui.menu_item("Create Field Below", on_click=lambda: self.field_handler.show_field_creation_dialog(self.display_order +1)) \
+                ui.menu_item("Create Field Below", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order +1)) \
                     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
                     
             with ui.row().style('width: 100%; justify-content: space-between; align-items: center;'):
@@ -359,7 +377,7 @@ class CustomFieldCard:
                     self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style).bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
                     self.labels.append(self.name_label)
                     
-                    self.name_change = ui.input(value=self.name).props('v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').style(self.label_style)
+                    self.name_change = ui.input(value=self.name).props('autofocus v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').style(self.label_style)
                     self.name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
                     self.name_change.on('keydown.escape', self.toggle_name_changing)
                 
@@ -378,7 +396,32 @@ class CustomFieldCard:
         
         self.card.on('click', lambda: self.on_click())
         self.card.on('dblclick', self.toggle_name_changing)
-                    
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "field_type": self.field_type,
+            "displayed": self.displayed,
+            "deleted": self.deleted,
+            "required": self.required,
+            "display_order": self.display_order,
+            "picklist_options": self.picklist_options,
+        }
+
+    async def duplicate_field(self):
+        data = self.to_dict()
+        data['display_order'] = self.display_order + 1  # or += 1 for safety
+
+        # Ensure field_handler is available on the instance
+        await self.field_handler.show_field_creation_dialog(
+            name=data.get('name'),
+            field_type=data.get('field_type'),
+            default=data.get('displayed'),
+            required=data.get('required'),
+            display_order=data.get('display_order'),
+            picklist_options=data.get('picklist_options'),
+        )
+    
     async def on_click(self):
         self.last_click = time.time()  # Move this up!
 
@@ -480,7 +523,7 @@ class CustomFieldSetCard:
 
         # Card Layout
         self.card = ui.card().tight().classes('justify-center border border-gray-300 rounded-md').style('width: 100%; padding: 5px;')
-
+        self.card.on('keydown', lambda: ui.notify("F2"))
         self.reorder_custom_fields()  # initial layout call
 
     def update_name(self, new_name):
@@ -603,7 +646,8 @@ class CustomFieldsHandler:
         self.field_set_handler:CustomFieldSetsHandler = field_set_handler
         self.parent_type = parent_type
         self.layout = None
-        
+        self.keyboard = ui.keyboard(on_key=self.handle_key)
+    
     def load(self):
         fields:list = app.storage.tab['fields']
         
@@ -616,7 +660,31 @@ class CustomFieldsHandler:
                 self.event_handler.set_custom_field_cards(fields)
     
         self.update_fields()
+    
+    async def handle_key(self, e: KeyEventArguments):
+
+        # if e.key == "Escape":
+        #     self.deselect_all_fields()
+            
+        # # WARNING field will show as "deleted" in Clio's "modify order" tool
+        # if e.key == 'Delete' and e.action.keydown:
+        #     await self.field_handler.delete_custom_fields()
         
+        # if e.key == 'd' and self.ctrl_down and e.action.keydown:
+        #     self.toggle_display_deleted()   
+        
+        # if e.key == 'n' and self.ctrl_down and e.action.keydown:
+        #     await self.field_handler.show_field_creation_dialog()
+            
+        if e.key == 'F2' and e.action.keydown:
+            ui.notify("F2 Keyboard event in field handler")
+            # if self.fields_selected_count == 1:
+            #     self.last_card_clicked.toggle_name_changing()
+        
+        else:
+            ui.notify(f"{e.key} Keyboard event in field handler")
+            # print(self.fields_selected_count)
+                
     def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
         self.field_set_handler = new_handler
         
@@ -675,7 +743,8 @@ class CustomFieldsHandler:
         app.storage.general['parent_type'] = parent_type
         
         if response:
-            ui.notify("Fields loaded from API")
+            # ui.notify("Fields loaded from API")
+            ui.notification(message=response, multi_line=True, timeout=None, close_button=True)
         else:
             ui.notify("Failed to Download Fields")
 
@@ -808,33 +877,101 @@ class CustomFieldsHandler:
         else:
             ui.notify("Cancelling deleting")
 
-    def create_custom_field_dialog(self, display_order=None) -> dict:
+    def create_custom_field_dialog(
+        self,
+        name: str = None,
+        field_type: str = None,
+        default: bool = False,
+        required: bool = False,
+        display_order: int = None,
+        picklist_options: list[dict] = None
+    ) -> ui.dialog:
+        
         field_types = [
             "checkbox", "contact", "currency", "date", "time", "email",
             "matter", "numeric", "picklist", "text_area", "text_line", "url"
         ]
 
-        picklist_choices = ["Option A", "Option B", "Option C"]
+        if not picklist_options:
+            picklist_options: list[str] = []
 
-        
-        with ui.dialog() as create_dialog, ui.card():
+        with ui.dialog() as create_dialog, ui.card().style('width: 500px;'):
             ui.label('Create Custom Field').classes('w-full text-xl font-bold')
 
             name_input = ui.input('Name').classes('w-full').props('dense')
+            if name:
+                name_input.set_value(name)
 
-            field_type_input = ui.select(field_types, label='Field Type') \
-                .classes('w-full').props('dense')
+            field_type_input = ui.select(field_types, label='Field Type').classes('w-full').props('dense').style('text-transform: capitalize;')
+            if field_type in field_types:
+                field_type_input.set_value(field_type)
 
-            picklist_dropdown = ui.select(picklist_choices, label='Picklist Options') \
-                .classes('w-full').props('dense')
-            picklist_dropdown.bind_visibility_from(field_type_input, 'value', value='picklist')
+            # === Dynamic Picklist Entry ===
+            picklist_container = ui.column().classes('w-full')
+            picklist_container.bind_visibility_from(field_type_input, 'value', value='picklist')
+
+            def add_picklist_input():
+                with ui.row().classes('w-full gap-2 items-center').style('width: 100%;') as row:
+                    input_field = ui.input(placeholder='Picklist option...') \
+                        .props('dense') \
+                        .style('flex: 1;')
+
+                    # ✅ Proper way to focus the input
+                    ui.run_javascript(f'getElement("{input_field.id}").$refs.qRef.focus()')
+
+                    add_button = ui.button('➕').props('dense')
+
+                    def handle_add():
+                        value = input_field.value.strip()
+                        if value and value not in picklist_options:
+                            picklist_options.append(value)
+                            row.clear()
+
+                            with row:
+                                ui.label(value).classes('font-bold').style('flex: 1;')
+
+                                def handle_remove():
+                                    picklist_options.remove(value)
+                                    row.delete()
+
+                                ui.button('❌', on_click=handle_remove).props('dense flat color=negative')
+
+                            add_picklist_input()
+
+                    add_button.on('click', handle_add)
+                    input_field.on('keydown.enter', lambda _: handle_add())
+
+            with picklist_container:
+                if picklist_options:
+                    for item in picklist_options:
+                        value = item.get("option", "").strip()
+                        if value:
+                            with ui.row().classes('w-full gap-2 items-center').style('width: 100%;') as row:
+                                ui.label(value).classes('font-bold').style('flex: 1;')
+
+                                def remove_closure(v=value, r=row):
+                                    def do_remove():
+                                        picklist_options[:] = [opt for opt in picklist_options if opt.get("option") != v]
+                                        r.delete()
+                                    return do_remove
+
+                                ui.button('❌', on_click=remove_closure()).props('dense flat color=negative')
+
+                add_picklist_input()  # Add the first row
+
+            # === End Picklist Section ===
 
             display_order_input = ui.input('Display Order (optional)').classes('w-full').props('dense')
             if display_order is not None:
                 display_order_input.set_value(str(display_order))
 
             default_checkbox = ui.checkbox('Default').props('dense')
+            if default:
+                default_checkbox.set_value(True)
+
             required_checkbox = ui.checkbox('Required').props('dense')
+            if required:
+                required_checkbox.set_value(True)
 
             with ui.row().classes('justify-end'):
                 ui.button('Cancel', on_click=lambda: create_dialog.submit(None)).props('flat')
@@ -848,15 +985,28 @@ class CustomFieldsHandler:
                         'display_order': display_order_input.value or None,
                     }
                     if result['field_type'] == 'picklist':
-                        result['picklist_choice'] = picklist_dropdown.value
+                        result['picklist_options'] = [
+                            {'option': o['option']} if isinstance(o, dict) else {'option': o}
+                            for o in picklist_options
+                        ]
+                    # if result['field_type'] == 'picklist':
+                    #     result['picklist_options'] = picklist_options
                     create_dialog.submit(result)
 
-                ui.button('Create', on_click= lambda: handle_submit()).props('color=primary')
-        
+                ui.button('Create', on_click=handle_submit).props('color=primary')
+
         return create_dialog
+
         
-    async def show_field_creation_dialog(self, display_order=None):
+    async def show_field_creation_dialog(self, action_type= "post", **kwargs):
         with self.event_handler.page_container:
-            dialog=  self.create_custom_field_dialog(display_order)
+            dialog=  self.create_custom_field_dialog(**kwargs)
             result = await dialog
-            ui.notify(result)
+            
+            if action_type == "post":
+                print(result)
+                await self.create_field(**result)
+
+    async def create_field(self, **kwargs):
+        response = await run.io_bound(create_custom_field, client=self.event_handler.api_client, parent_type=self.parent_type, **kwargs)
+        ui.notification(message=response, multi_line=True, timeout=None, close_button=True)

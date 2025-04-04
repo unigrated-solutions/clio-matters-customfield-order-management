@@ -10,57 +10,6 @@ from elements import *
 from api import *
 
 logging.basicConfig(level=logging.DEBUG)
-    
-async def copy(selected_token):
-    ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
-    ui.notify('Copied to clipboard')
-    
-# async def create_access_token():
-    
-    # def link_dialog(target):
-    #     with ui.dialog() as dialog,ui.card().style('width: 1440px; max-width: none; height: 810px;'):
-    #         with ui.element('q-toolbar'):
-    #             with ui.element('q-toolbar-title'):
-    #                 ui.label('pop window')
-    #             ui.button(icon='close',on_click=dialog.close).props('flat round dense')
-    #         with ui.element('q-card-section').classes('w-full h-full'):
-    #             with ui.element('iframe').classes('w-full h-full'):
-    #                 ui.navigate.to(target)
-    #     return dialog
-
-#     """Fetch client ID, store credentials with state, and open the OAuth URL in a new tab."""
-
-#     # client_id = selected_row.get("client_id")
-#     # client_secret = selected_row.get("client_secret")
-    
-#     client_id = "123"
-#     client_secret = "123"
-
-#     if not client_id or not client_secret:
-#         ui.notify("Client ID or Client Secret is missing!", type="warning")
-#         return
-
-#     # Generate a random state token
-#     state = secrets.token_urlsafe(16)
-#     timestamp = time.time()
-
-#     # Store state, timestamp, client ID, and client secret in storage
-#     app.storage.general[f"oauth_state_{state}"] = {
-#         "timestamp": timestamp,
-#         "client_id": client_id,
-#         "client_secret": client_secret,
-#     }
-
-#     # Construct the OAuth URL
-#     params = {
-#         "response_type": "code",
-#         "client_id": client_id,
-#         "redirect_uri": REDIRECT_URI,
-#         "state": state
-#     }
-#     auth_url = f"{AUTH_BASE_URL}?{urlencode(params)}"
-#     print(auth_url)
-#     link_dialog(auth_url).open()
 
 @ui.page("/")
 async def new_tab():
@@ -68,6 +17,10 @@ async def new_tab():
     
 @ui.page("/customfield_management")
 async def customfield_management_page():
+    
+    async def copy_token(selected_token):
+        ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
+        ui.notify('Copied to clipboard')
     
     if not app.storage.general.get('custom_fields'):
         app.storage.general['custom_fields'] = {"matter": [], "contact": []}
@@ -96,9 +49,6 @@ async def customfield_management_page():
         app.storage.general['access_token'] = token
         ui.notify("Access Token Saved")
     
-    def handle_field_creation(data: dict):
-        ui.notify(f"Field Created: {data['name']} ({data})")
-    
     with ui.header(elevated=True).style('background-color: #3874c8; padding: 5px 2px;').classes('items-center justify-between'):
         with ui.row():
             with ui.row().classes('w-full items-center').style('gap: 5px;') as menu_bar:
@@ -114,7 +64,14 @@ async def customfield_management_page():
                 with ui.button(text="Tools").classes('text-white').props('flat').style('height: 30px; width: 60px;'):
                     with ui.menu() as menu:
                         # ui.menu_item('Create Access Token', create_access_token)
-                        ui.menu_item('Custom Field Management', on_click= lambda: ui.navigate.to(customfield_management_page))
+                        with ui.menu_item('Custom Field Management', auto_close=False):
+                            with ui.item_section().props('side'):
+                                ui.icon('keyboard_arrow_right')
+                            with ui.menu().props('anchor="top end" self="top start" auto-close'):
+                                ui.menu_item('Matters', on_click= lambda: ui.navigate.to(customfield_management_page))
+                                ui.menu_item('Contacts', on_click= lambda: ui.navigate.to(customfield_management_page))
+
+
         with ui.row():
             access_token = ui.input(
                 placeholder="Enter Access Token...",
@@ -134,12 +91,11 @@ async def customfield_management_page():
             
             
             copy_button = ui.button(icon="content_copy").style('height: 35px; width: 35px;')
-            copy_button.on('click', lambda: copy(access_token.value))
+            copy_button.on('click', lambda: copy_token(access_token.value))
             save_button = ui.button(icon='save').style('height: 35px; width: 35px;')
             save_button.on('click', lambda: store_access_token(access_token.value) )
 
 
-    ExpandableRightDrawer(event_handler=event_handler)
     with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
         field_handler, field_set_handler = event_handler.init_handlers(page_container)
         page_container.on('dblclick', event_handler.deselect_all_fields)
@@ -185,4 +141,6 @@ async def customfield_management_page():
                     toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
                     ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api())
 
+    ExpandableRightDrawer(event_handler=event_handler)
+    
 ui.run(storage_secret="CHANGEME", title= 'Custom Field Management', native=True , window_size=(1440,810), uvicorn_logging_level="debug")
