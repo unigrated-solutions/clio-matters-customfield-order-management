@@ -96,6 +96,7 @@ async def customfield_management_page():
             save_button.on('click', lambda: store_access_token(access_token.value) )
 
 
+    ExpandableRightDrawer(event_handler=event_handler)
     with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
         field_handler, field_set_handler = event_handler.init_handlers(page_container)
         page_container.on('dblclick', event_handler.deselect_all_fields)
@@ -119,28 +120,32 @@ async def customfield_management_page():
                 field_handler.load()
                 
             # Search box always visible
-            with ui.column().style('width: 100%; background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
+            with ui.column().style('width: calc(100% - 50px); background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
                 
                 def filter_fields():
                     search_text = custom_field_filter.value
                     logging.debug(f"Filtering with: {search_text}")
                     for card in app.storage.tab['fields']:
-                        card.update_visibility(search_text)  # Update visibility
+                        card.update_visibility(search_text)
+
+                # Filter row with proper wrapping
+                with ui.row().classes('w-full items-center').style('padding: 5px 2px; flex-wrap: wrap; gap: 8px;'):
                     
-                # Input field for filtering
-                with ui.row().classes('w-full items-center justify-between').style('padding: 5px, 2px;'):
-                    custom_field_filter = ui.input(placeholder="Filter fields by name...", on_change=filter_fields).style(
-                        'width: 300px;  border-radius: 5px; '
-                        'border: 2px; padding: 0;'
-                    ).props('v-model="text" dense="dense" size=32')
-                    
+                    custom_field_filter = ui.input(
+                        placeholder="Filter fields by name...",
+                        on_change=filter_fields
+                    ).style(
+                        'flex: 1 1 200px; min-width: 150px; max-width: 300px; '
+                        'border-radius: 5px; border: 2px solid #ccc; padding: 0;'
+                    ).props('dense size=32')
+
                     if not app.storage.tab.get('display_deleted'):
                         app.storage.tab['display_deleted'] = False
-                        
-                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab,'display_deleted').props('dense')
-                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
-                    ui.button(icon='refresh', on_click= lambda: field_handler.load_from_api())
 
-    ExpandableRightDrawer(event_handler=event_handler)
+                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab, 'display_deleted').props('dense')
+                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
+
+                    ui.button(icon='refresh', on_click=lambda: field_handler.load_from_api())
+
     
-ui.run(storage_secret="CHANGEME", title= 'Custom Field Management', native=True , window_size=(1440,810), uvicorn_logging_level="debug")
+ui.run(native=True,storage_secret="CHANGEME", title= 'Custom Field Management', uvicorn_logging_level="debug")

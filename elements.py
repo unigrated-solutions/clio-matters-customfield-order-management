@@ -383,6 +383,12 @@ class CustomFieldCard:
                 
             
                 with ui.row().style('align-items: center; gap: 16px;'):
+                    
+                    with ui.row().style('align-items: center; gap: 4px;'):
+                        # self.labels.append(ui.label('Field Type:').style('font-weight: bold;'))
+                        self.labels.append(ui.label().bind_text_from(self, 'field_type').style('font-weight: bold;'))
+                        
+                        # Add click event for selection
                     # Group 1: Checkboxes
                     with ui.row().style('align-items: center; gap: 8px;'):
                         ui.checkbox('Default', on_change= lambda e: self.update_default(e.sender.value) if not self.updating else None).bind_value_from(self, 'displayed')
@@ -646,7 +652,7 @@ class CustomFieldsHandler:
         self.field_set_handler:CustomFieldSetsHandler = field_set_handler
         self.parent_type = parent_type
         self.layout = None
-        self.keyboard = ui.keyboard(on_key=self.handle_key)
+        # self.keyboard = ui.keyboard(on_key=self.handle_key)
     
     def load(self):
         fields:list = app.storage.tab['fields']
@@ -661,7 +667,7 @@ class CustomFieldsHandler:
     
         self.update_fields()
     
-    async def handle_key(self, e: KeyEventArguments):
+    # async def handle_key(self, e: KeyEventArguments):
 
         # if e.key == "Escape":
         #     self.deselect_all_fields()
@@ -676,14 +682,14 @@ class CustomFieldsHandler:
         # if e.key == 'n' and self.ctrl_down and e.action.keydown:
         #     await self.field_handler.show_field_creation_dialog()
             
-        if e.key == 'F2' and e.action.keydown:
-            ui.notify("F2 Keyboard event in field handler")
+        # if e.key == 'F2' and e.action.keydown:
+        #     ui.notify("F2 Keyboard event in field handler")
             # if self.fields_selected_count == 1:
             #     self.last_card_clicked.toggle_name_changing()
         
-        else:
-            ui.notify(f"{e.key} Keyboard event in field handler")
-            # print(self.fields_selected_count)
+        # else:
+        #     ui.notify(f"{e.key} Keyboard event in field handler")
+        #     # print(self.fields_selected_count)
                 
     def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
         self.field_set_handler = new_handler
@@ -1009,4 +1015,6 @@ class CustomFieldsHandler:
 
     async def create_field(self, **kwargs):
         response = await run.io_bound(create_custom_field, client=self.event_handler.api_client, parent_type=self.parent_type, **kwargs)
-        ui.notification(message=response, multi_line=True, timeout=None, close_button=True)
+        if response:
+            ui.notify(f'Field Created: {kwargs}')
+        # ui.notification(message=response, multi_line=True, timeout=None, close_button=True)

@@ -1,0 +1,5 @@
+nicegui
+typing-inspect
+httpx
+pywebview
+pandas

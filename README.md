@@ -16,6 +16,15 @@ This is a **locally run web-based application** built with [NiceGUI](https://git
     - Create new field above
     - Create new field below
 
+## API Client
+- Seems to be keeping up with all the changes made to the api recently.
+- Models that load by default when initializing the submodule have not been updated but work fine
+
+## Issues:
+- **Running in native mode:**
+    - If there are any dependency issues when running, run in a browser by removing the "native=True" in the very last line of app.py
+    - native mode seems to run fine on windows, by there may be issues with pywebview on certain linux systems
+
 ## Quickly edit field names
 ![](screenshots/rename_field.png)
 ## Duplicate Field
