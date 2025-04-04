@@ -11,3 +11,5 @@ This is a **locally run web-based application** built with [NiceGUI](https://git
 
     
 ![](screenshot.png)
+
+Check the development branch for updates 
