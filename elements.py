@@ -37,7 +37,7 @@ class ExpandableRightDrawer(ui.right_drawer):
         self.expanded = False  # track the state
 
         # Create the drawer
-        with self.props('width=50').style(self.get_drawer_style()):
+        with self.props('width=50, behavior=desktop').style(self.get_drawer_style()):
             
             self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
             with self.toggle_row:
