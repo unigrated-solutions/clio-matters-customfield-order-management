@@ -1,0 +1,6 @@
+PyGObject==3.50.0
+nicegui
+typing-inspect
+httpx
+pywebview
+pandas

@@ -135,6 +135,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.vscode/
 
 # Spyder project settings
 .spyderproject
@@ -171,3 +172,4 @@ cython_debug/
 .pypirc
 customfield_sets.json
 customfields.json
+.nicegui/

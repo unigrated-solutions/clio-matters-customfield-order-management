@@ -111,18 +111,29 @@ def update_custom_field_display_order(client:Client, field_id, new_position):
     
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
-          
-def get_custom_fields(client:Client=None, parent_type="matter"):
-    # ui.notify(client)
+
+def get_custom_field(client:Client=None, **kwargs):
+    assert kwargs.get('id')
+    
+    kwargs.setdefault('fields', 'all')
     try:
         response = {"Success": True}
-        response = client.all.custom_fields(fields="all", parent_type=parent_type)
+        response = client.get.custom_fields(**kwargs)
         logging.debug(json.dumps(response, indent=2))
         return response
     
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
-
+           
+def get_custom_fields(client:Client=None, parent_type="matter"):
+    try:
+        response = {"Success": True}
+        response = client.all.custom_fields(fields="id,name,parent_type,field_type,displayed,deleted,required,display_order,picklist_options{id,option}", parent_type=parent_type)
+        logging.debug(json.dumps(response, indent=2))
+        return response
+    
+    except Exception as e:
+        logging.debug(f"An error occurred: {e}")
 
 def get_custom_field_sets(client:Client=None, parent_type="Matter"):
     parent_type=parent_type.title()
@@ -167,3 +178,17 @@ def delete_custom_field(client, field_id):
     
     except Exception as e:
         logging.debug(f"An error occurred: {e}")
+        
+def create_custom_field(client, **kwargs):
+    print(kwargs)
+    kwargs.setdefault('fields', 'all')
+    kwargs.setdefault('parent_type', 'matter')
+    try:
+        response = client.post.custom_fields(**kwargs)
+        print(response)
+        logging.debug(json.dumps(response, indent=2))
+        return True
+    
+    except Exception as e:
+        logging.debug(f"An error occurred: {e}")
+        return False
