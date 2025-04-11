@@ -11,6 +11,18 @@ from api import *
 
 logging.basicConfig(level=logging.DEBUG)
 
+def check_storage():
+    
+    if not app.storage.general.get('matter_custom_fields'):
+        app.storage.general['matter_custom_fields'] = []
+    if not app.storage.general.get('matter_custom_field_sets'):
+        app.storage.general['matter_custom_field_sets'] = []
+        
+    if not app.storage.general.get('contact_custom_fields'):
+        app.storage.general['contact_custom_fields'] = []
+    if not app.storage.general.get('contact_custom_field_sets'):
+        app.storage.general['contact_custom_field_sets'] = []
+        
 @ui.page("/")
 async def new_tab():
     ui.navigate.to(customfield_management_page)
@@ -22,11 +34,7 @@ async def customfield_management_page():
         ui.run_javascript(f'navigator.clipboard.writeText("{selected_token}")')
         ui.notify('Copied to clipboard')
     
-    if not app.storage.general.get('custom_fields'):
-        app.storage.general['custom_fields'] = {"matter": [], "contact": []}
-        
-    if not app.storage.general.get('custom_field_sets'):
-        app.storage.general['custom_field_sets'] = {"matter": [], "contact": []}
+    check_storage()
     
     ui.query('.nicegui-content').classes('p-0 m-0 gap-0')
     await ui.context.client.connected()
@@ -80,11 +88,9 @@ async def customfield_management_page():
             ).props('v-model="text" dense="dense" size=48').style(
                 'width: 250px; border-radius: 5px; '
                 'background-color: white; color: #333; padding-left: 12px;'
-            )
+            ).bind_value(app.storage.general, 'access_token')
             
-            if app.storage.general.get('access_token'):
-                access_token.set_value(app.storage.general['access_token'])
-                event_handler.update_access_token(app.storage.general['access_token'])
+            event_handler.update_access_token(access_token.value)
             
             access_token.bind_value_to(app.storage.tab, 'api_key')
             access_token.on('change', lambda: event_handler.update_access_token(access_token.value))
@@ -95,8 +101,9 @@ async def customfield_management_page():
             save_button = ui.button(icon='save').style('height: 35px; width: 35px;')
             save_button.on('click', lambda: store_access_token(access_token.value) )
 
-
-    ExpandableRightDrawer(event_handler=event_handler)
+    right_drawer = ExpandableRightDrawer(event_handler=event_handler)
+    await right_drawer.refresh()
+    
     with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
         field_handler, field_set_handler = event_handler.init_handlers(page_container)
         page_container.on('dblclick', event_handler.deselect_all_fields)
@@ -115,37 +122,39 @@ async def customfield_management_page():
         with ui.column().style('flex: 1; gap: 0; height: 100%; padding: 0; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke;'):
             ui.label('Fields').classes('w-full text-2xl bg-white font-bold border border-gray-300 p-2 rounded text-center')
             
-            # Scroll area for cards
-            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
-                field_handler.load()
-                
-            # Search box always visible
-            with ui.column().style('width: calc(100% - 50px); background-color: white; padding: 10px; position: sticky; top: 0; z-index: 10; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);'):
-                
+            with ui.row().classes('w-full items-center').style('justify-content: space-between; padding: 5px 2px; flex-wrap: wrap; gap: 8px; background-color: white;'):
                 def filter_fields():
                     search_text = custom_field_filter.value
                     logging.debug(f"Filtering with: {search_text}")
                     for card in app.storage.tab['fields']:
                         card.update_visibility(search_text)
+                        
+                custom_field_filter = ui.input(
+                    placeholder="Filter fields by name...",
+                    on_change=filter_fields
+                ).style(
+                    'flex: 1 1 200px; min-width: 150px; max-width: 300px; '
+                    'border-radius: 5px; border: 2px solid #ccc; padding: 0;'
+                ).props('dense size=32')
+                
+                event_handler.set_field_filter_element(custom_field_filter)
+                
+                
+            # Scroll area for cards
+            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0;'):
+                field_handler.load()
+                
+            # Filter row with proper wrapping
+            with ui.row().classes('w-full items-center').style('justify-content: space-between; padding: 5px 2px; flex-wrap: wrap; gap: 8px; background-color: white;'):
 
-                # Filter row with proper wrapping
-                with ui.row().classes('w-full items-center').style('padding: 5px 2px; flex-wrap: wrap; gap: 8px;'):
-                    
-                    custom_field_filter = ui.input(
-                        placeholder="Filter fields by name...",
-                        on_change=filter_fields
-                    ).style(
-                        'flex: 1 1 200px; min-width: 150px; max-width: 300px; '
-                        'border-radius: 5px; border: 2px solid #ccc; padding: 0;'
-                    ).props('dense size=32')
+                if not app.storage.tab.get('display_deleted'):
+                    app.storage.tab['display_deleted'] = False
 
-                    if not app.storage.tab.get('display_deleted'):
-                        app.storage.tab['display_deleted'] = False
+                toggle_deleted_field = ui.switch("Show Deleted").bind_value(app.storage.tab, 'display_deleted').props('dense')
+                toggle_details = ui.switch("Show Details").bind_value(app.storage.tab, 'display_field_details').props('dense')
+                # toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
 
-                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_from(app.storage.tab, 'display_deleted').props('dense')
-                    toggle_deleted_field.on('click', lambda e: event_handler.toggle_display_deleted())
-
-                    ui.button(icon='refresh', on_click=lambda: field_handler.load_from_api())
+                ui.button(icon='refresh', on_click=lambda: field_handler.load_from_api())
 
     
-ui.run(native=True,storage_secret="CHANGEME", title= 'Custom Field Management', uvicorn_logging_level="debug")
+ui.run(port=8080, storage_secret="CHANGEME", title= 'Custom Field Management', uvicorn_logging_level="debug", reload=False, native=True , window_size=(1440,810))
