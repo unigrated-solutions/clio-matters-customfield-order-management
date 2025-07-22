@@ -8,6 +8,12 @@ from api import *
 
 logging.basicConfig(level=logging.DEBUG)
 
+@binding.bindable_dataclass
+class AppElementVisibility:
+    display_delete:bool = False
+    display_field_details:bool = False
+    
+    
 async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
     def key_press(e: KeyEventArguments):
         if e['key'] == 'Enter':
@@ -29,127 +35,127 @@ async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
     result = await dialog
     return result
     
-class ExpandableRightDrawer(ui.right_drawer):
-    def __init__(self, event_handler):
-        super().__init__(bordered=True)
+# class ExpandableRightDrawer(ui.right_drawer):
+#     def __init__(self, event_handler):
+#         super().__init__(bordered=True)
         
-        self.event_handler = event_handler
-        self.expanded = False  # track the state
+#         self.event_handler = event_handler
+#         self.expanded = False  # track the state
 
-        # Create the drawer
-        with self.props('width=50, behavior=desktop').style(self.get_drawer_style()):
+#         # Create the drawer
+#         with self.props('width=50, behavior=desktop').style(self.get_drawer_style()):
             
-            self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
-            with self.toggle_row:
-                self.toggle_button = ui.button(on_click=self.toggle).style('''
-                    width: 40px;
-                    height: 40px;
-                    min-width: 40px;
-                    padding: 0;
-                    margin: 0;
-                ''')
-                ui.separator()
-                self.update_button_icon()
+#             self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
+#             with self.toggle_row:
+#                 self.toggle_button = ui.button(on_click=self.toggle).style('''
+#                     width: 40px;
+#                     height: 40px;
+#                     min-width: 40px;
+#                     padding: 0;
+#                     margin: 0;
+#                 ''')
+#                 ui.separator()
+#                 self.update_button_icon()
                 
                 
-            with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
+#             with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
 
-                self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
-                    font-weight: bold;
-                    color: white;
-                    text-transform: capitalize;
-                    background-color: #1976d2;
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                ''')
+#                 self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
+#                     font-weight: bold;
+#                     color: white;
+#                     text-transform: capitalize;
+#                     background-color: #1976d2;
+#                     border: 1px solid #ccc;
+#                     border-radius: 4px;
+#                 ''')
                                 
-                with self.parent_type_menu:
-                    with ui.menu():
-                        ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
-                        ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
+#                 with self.parent_type_menu:
+#                     with ui.menu():
+#                         ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
+#                         ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
     
-                # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
-                ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
+#                 # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
+#                 ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
     
-    async def load(self):
-        self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
-        with self.toggle_row:
-            self.toggle_button = ui.button(on_click=self.toggle).style('''
-                width: 40px;
-                height: 40px;
-                min-width: 40px;
-                padding: 0;
-                margin: 0;
-            ''')
-            ui.separator()
-            self.update_button_icon()
+#     async def load(self):
+#         self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
+#         with self.toggle_row:
+#             self.toggle_button = ui.button(on_click=self.toggle).style('''
+#                 width: 40px;
+#                 height: 40px;
+#                 min-width: 40px;
+#                 padding: 0;
+#                 margin: 0;
+#             ''')
+#             ui.separator()
+#             self.update_button_icon()
             
             
-        with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
+#         with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
 
-            self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
-                font-weight: bold;
-                color: white;
-                text-transform: capitalize;
-                background-color: #1976d2;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-            ''')
+#             self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
+#                 font-weight: bold;
+#                 color: white;
+#                 text-transform: capitalize;
+#                 background-color: #1976d2;
+#                 border: 1px solid #ccc;
+#                 border-radius: 4px;
+#             ''')
                             
-            with self.parent_type_menu:
-                with ui.menu():
-                    ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
-                    ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
+#             with self.parent_type_menu:
+#                 with ui.menu():
+#                     ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
+#                     ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
 
-            # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
-            ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
+#             # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
+#             ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
             
-    async def set_parent_type(self, type):
-        await self.event_handler.set_parent_type(type)
-        self.parent_type_menu.set_text(f'{self.event_handler.parent_type.capitalize()} Custom Fields')
+#     async def set_parent_type(self, type):
+#         await self.event_handler.set_parent_type(type)
+#         self.parent_type_menu.set_text(f'{self.event_handler.parent_type.capitalize()} Custom Fields')
         
-    def get_drawer_style(self) -> str:
-        if self.expanded:
-            return '''
-                transition: width 0.3s ease;
-                padding-top: 12px;
-                padding-left: 12px;
-                padding-right: 12px;
-                align-items: center;
-            '''
-        else:
-            return '''
-                transition: width 0.3s ease;
-                padding-top: 12px;
-                padding-left: 0px;
-                padding-right: 0px;
-            '''
+#     def get_drawer_style(self) -> str:
+#         if self.expanded:
+#             return '''
+#                 transition: width 0.3s ease;
+#                 padding-top: 12px;
+#                 padding-left: 12px;
+#                 padding-right: 12px;
+#                 align-items: center;
+#             '''
+#         else:
+#             return '''
+#                 transition: width 0.3s ease;
+#                 padding-top: 12px;
+#                 padding-left: 0px;
+#                 padding-right: 0px;
+#             '''
         
-    def get_toggle_row_style(self) -> str:
-        return '''
-            justify-content: flex-start;
-        ''' if self.expanded else '''
-            justify-content: center;
-        '''
+#     def get_toggle_row_style(self) -> str:
+#         return '''
+#             justify-content: flex-start;
+#         ''' if self.expanded else '''
+#             justify-content: center;
+#         '''
         
-    def toggle(self):
-        self.expanded = not self.expanded
+#     def toggle(self):
+#         self.expanded = not self.expanded
 
-        # Update width using props (the last one wins)
-        new_width = '300' if self.expanded else '50'
-        self.props(f'width={new_width}').style(self.get_drawer_style())
+#         # Update width using props (the last one wins)
+#         new_width = '300' if self.expanded else '50'
+#         self.props(f'width={new_width}').style(self.get_drawer_style())
 
-        # Update toggle row alignment
-        self.toggle_row.style(self.get_toggle_row_style())
+#         # Update toggle row alignment
+#         self.toggle_row.style(self.get_toggle_row_style())
 
-        self.update_button_icon()
+#         self.update_button_icon()
 
-    def update_button_icon(self):
-        self.toggle_button.props(f"icon={'chevron_right' if self.expanded else 'chevron_left'}")
+#     def update_button_icon(self):
+#         self.toggle_button.props(f"icon={'chevron_right' if self.expanded else 'chevron_left'}")
 
-    async def refresh(self):
-        width = '300' if self.expanded else '50'
-        self.props(f'width={width}').style(self.get_drawer_style())
+#     async def refresh(self):
+#         width = '300' if self.expanded else '50'
+#         self.props(f'width={width}').style(self.get_drawer_style())
         
 class EventHandler:
     fields_selected_count = binding.BindableProperty()
@@ -297,7 +303,7 @@ class EventHandler:
         pass
     
     def toggle_display_deleted(self):
-        app.storage.tab["display_deleted"] = not app.storage.tab.get("display_deleted", False)
+        app.storage.client["display_deleted"] = not app.storage.client.get("display_deleted", False)
                     
     async def toggle_parent_type(self):
         self.parent_type= "contact" if self.parent_type == "matter" else "matter"
@@ -334,7 +340,6 @@ class CustomFieldCard:
         self.event_handler = event_handler
         self.field_handler = field_handler
         self.field_data = field_data
-        # self.field_data = field_data.copy()
         self.selected = False 
         self.updating_name = False
         self.updating = False
@@ -351,6 +356,9 @@ class CustomFieldCard:
         self.deleted = self.field_data["deleted"]
         self.required = self.field_data['required']
         self.display_order = self.field_data["display_order"]
+        
+        self.visibility_handler = app.storage.client['visibility_handler']
+        
         if self.field_data.get('picklist_options'):
             self.picklist_options = self.field_data['picklist_options']
         else:
@@ -364,13 +372,13 @@ class CustomFieldCard:
         
         if self.deleted:
             self.name += (": (Deleted)")
-            self.card.bind_visibility_from(app.storage.tab, 'display_deleted')
+            self.card.bind_visibility_from(self.visibility_handler, 'display_deleted')
             # self.card.bind_visibility_from(self.event_handler.field_filter_element, 'value', backward=lambda: self.name in 'value')
             
         with self.card:
             with ui.context_menu().props('auto-close'):
                 # Always Show
-                ui.menu_item('Copy Id', self.copy_id)
+                # ui.menu_item('Copy Id', self.copy_id)
                 
                 # Only show these when more than one field is selected
                 ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before")) \
@@ -405,7 +413,7 @@ class CustomFieldCard:
                     self.name_change.on('keydown.escape', self.toggle_name_changing)
                 
             
-                with ui.row().style('align-items: center; gap: 16px;').bind_visibility_from(app.storage.tab, 'display_field_details'):
+                with ui.row().style('align-items: center; gap: 16px;').bind_visibility_from(self.visibility_handler, 'display_field_details'):
                     
                     with ui.row().style('align-items: center; gap: 4px;'):
                         # self.labels.append(ui.label('Field Type:').style('font-weight: bold;'))
@@ -461,9 +469,9 @@ class CustomFieldCard:
         else:
             self.select_card()
         
-    async def copy_id(self):
-        ui.run_javascript(f'navigator.clipboard.writeText("{self.id}")')
-        ui.notify('Copied to clipboard')
+    # async def copy_id(self):
+    #     ui.run_javascript(f'navigator.clipboard.writeText("{self.id}")')
+    #     ui.notify('Copied to clipboard')
     
     def select_card(self):
         """Select this card and update its background color."""
@@ -525,6 +533,12 @@ class CustomFieldCard:
         self.updating = False
             
 class CustomFieldSetCard:
+    """A reusable card component for displaying and filtering custom fields."""
+    id = binding.BindableProperty()
+    name = binding.BindableProperty()
+    parent_type = binding.BindableProperty()
+    updating_name = binding.BindableProperty()
+    
     def __init__(self, field_set_data, event_handler):
         """Initialize the custom field set card with data."""
         self.field_set_data = field_set_data
@@ -608,7 +622,7 @@ class CustomFieldSetCard:
             
             with ui.grid(columns=2).classes('w-full gap-3'):
                 for field in self.custom_field_data:
-                    print(field['name'])
+                    # print(field['name'])
                     label = ui.label(field['name']).classes(
                         'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
                     ).style(
@@ -616,7 +630,7 @@ class CustomFieldSetCard:
                     )
 
                     if field.get('deleted', False):
-                        label.bind_visibility_from(app.storage.tab, 'display_deleted')
+                        label.bind_visibility_from(app.storage.client, 'display_deleted')
 
 class CustomFieldSetsHandler:
     def __init__(self, event_handler=None, field_handler = None, parent_type:str = None):
@@ -632,7 +646,7 @@ class CustomFieldSetsHandler:
             
         with self.layout:
             for field_set in app.storage.general.get(f'{self.parent_type}_custom_field_sets'):
-                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
+                app.storage.client['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
 
     def update_field_handler(self, new_handler):
         self.field_handler = new_handler
@@ -641,12 +655,12 @@ class CustomFieldSetsHandler:
         self.parent_type = new_parent_type
         
     def update_field_sets(self) -> None:
-        app.storage.tab['field_set_cards'].clear()
+        app.storage.client['field_set_cards'].clear()
         self.layout.clear()
-        app.storage.tab['field_set_cards'] = []
+        app.storage.client['field_set_cards'] = []
         with self.layout:
             for field_set in app.storage.general[f'{self.parent_type}_custom_field_sets']:
-                app.storage.tab['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
+                app.storage.client['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
 
     async def load_from_storage(self, parent_type="matter"):
         parent_type = self.event_handler.parent_type
@@ -674,7 +688,49 @@ class CustomFieldSetsHandler:
             return True
         else:
             return False
+
+
+    def create_custom_field_set_dialog(
+        self,
+        name: str = None,
+
+    ) -> ui.dialog:
+        
+
+        with ui.dialog() as create_dialog, ui.card().style('width: 500px;'):
+            ui.label('Create Custom Field').classes('w-full text-xl font-bold')
+
+            name_input = ui.input('Name').classes('w-full').props('dense')
+            if name:
+                name_input.set_value(name)
+
+            with ui.row().classes('justify-end'):
+                ui.button('Cancel', on_click=lambda: create_dialog.submit(None)).props('flat')
+
+                def handle_submit():
+                    result = {
+                        'name': name_input.value
+                    }
+                    create_dialog.submit(result)
+
+                ui.button('Create', on_click=handle_submit).props('color=primary')
+
+        return create_dialog
+     
+    async def show_field_set_creation_dialog(self, action_type= "post", **kwargs):
+        with self.event_handler.page_container:
+            dialog=  self.create_custom_field_set_dialog(**kwargs)
+            result = await dialog
             
+            if action_type == "post" and result:
+                print(f"Field Set Dialog Results: {result}")
+                await self.create_field_set(**result)
+
+    async def create_field_set(self, **kwargs):
+        response = await run.io_bound(create_custom_field_set, client=self.event_handler.api_client, parent_type=self.parent_type, **kwargs)
+        if response:
+            ui.notify(f'Field Created: {kwargs}')
+        
 class CustomFieldsHandler:
     def __init__(self, event_handler:EventHandler=None, field_set_handler:CustomFieldSetsHandler=None, parent_type:str = None):
         
@@ -685,7 +741,7 @@ class CustomFieldsHandler:
         # self.keyboard = ui.keyboard(on_key=self.handle_key)
     
     def load(self):
-        fields:list = app.storage.tab['fields']
+        fields:list = app.storage.client['fields']
         
         with ui.column().classes('w-full'):
             with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
@@ -702,7 +758,7 @@ class CustomFieldsHandler:
         
     def update_fields(self) -> None:
 
-        custom_field_cards = app.storage.tab['fields']
+        custom_field_cards = app.storage.client['fields']
         field_data = app.storage.general.get(f'{self.parent_type}_custom_fields', [])
         for card in custom_field_cards:
             new_index = card.display_order
@@ -711,7 +767,7 @@ class CustomFieldsHandler:
             app.storage.general.get(f'{self.parent_type}_custom_fields', [])[storage_index]['display_order'] = new_index
             
     def clear_and_refresh(self):
-        fields:list = app.storage.tab['fields']
+        fields:list = app.storage.client['fields']
         fields.clear()
         self.layout.clear()
         with self.layout:
@@ -743,7 +799,7 @@ class CustomFieldsHandler:
             self.field_set_handler.update_parent_type(parent_type)
         
         response = await run.io_bound(get_custom_fields, self.event_handler.api_client, parent_type)
-        print(response)
+        # print(response)
         data = response.get('data', [])
         data = sorted(data, key=lambda x: x['display_order'])
         app.storage.general[f'{self.parent_type}_custom_fields'] = data
@@ -761,11 +817,6 @@ class CustomFieldsHandler:
         else:
             ui.notify("Failed to Download Fields")
 
-    #Replace with API patch call    
-    def log_display_order_change(self, item_id, new_order):
-        ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")        
-        return True
-    
     def update_position(self, item_id, new_order):
         ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")
         update_custom_field_display_order(self.event_handler.api_client, item_id, new_order)
@@ -773,7 +824,7 @@ class CustomFieldsHandler:
         return True
 
     def move_item(self, moving_id, target_id, position, on_display_order_change):
-        cards = app.storage.tab['fields']
+        cards = app.storage.client['fields']
         cards = sorted(cards, key=lambda x: x.display_order)
 
         moving_item = next(card for card in cards if card.id == moving_id)
@@ -834,7 +885,7 @@ class CustomFieldsHandler:
         return False
 
     def bulk_move_items(self, moving_ids, target_id, position):
-        cards = app.storage.tab['fields']
+        cards = app.storage.client['fields']
 
         # Map of id to card for lookup
         id_to_order = {card.id: card.display_order for card in cards}
@@ -854,7 +905,7 @@ class CustomFieldsHandler:
                     target_id = id
                     
     def move_selected_cards(self, target_id, position):
-        cards = app.storage.tab['fields']
+        cards = app.storage.client['fields']
 
         selected_cards = [card for card in cards if card.selected]
         if not selected_cards:
@@ -877,7 +928,7 @@ class CustomFieldsHandler:
         names = []
         ids = []
         
-        for card in app.storage.tab['fields']:
+        for card in app.storage.client['fields']:
             if card.selected:
                 names.append(card.name)
                 ids.append(card.id)
@@ -1009,14 +1060,13 @@ class CustomFieldsHandler:
                 ui.button('Create', on_click=handle_submit).props('color=primary')
 
         return create_dialog
-
-        
+     
     async def show_field_creation_dialog(self, action_type= "post", **kwargs):
         with self.event_handler.page_container:
             dialog=  self.create_custom_field_dialog(**kwargs)
             result = await dialog
             
-            if action_type == "post":
+            if action_type == "post" and result:
                 print(result)
                 await self.create_field(**result)
 
@@ -1026,32 +1076,3 @@ class CustomFieldsHandler:
             ui.notify(f'Field Created: {kwargs}')
         # ui.notification(message=response, multi_line=True, timeout=None, close_button=True)
         
-# class CustomField(ui.card):
-#     def __init__(self, field_data={}, event_handler: EventHandler = None, field_handler=None):
-#         super().__init__()
-#         self.event_handler = event_handler
-#         self.field_handler = field_handler
-#         self.field_data = field_data
-#         self.selected = False
-
-#         self.id = field_data.get("id")
-#         self.name = "Test" #field_data.get("name")
-#         self.parent_type = field_data.get("parent_type")
-#         self.display_order = 0 # field_data.get("display_order")
-#         self.deleted = field_data.get("deleted")
-
-#         # Full height and centered content
-#         # with self.tight().style('width: 100%; justify-content: space-between; align-items: center; cursor: pointer; transition: background-color 0.3s; padding: 5px;'):
-#         with self.tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;'):
-#             with ui.context_menu():
-#                 ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before", self.parent_type))
-#                 ui.menu_item('Insert Below', lambda: self.field_handler.move_selected_cards(self.id, "after", self.parent_type))
-                
-                
-#             with ui.row().style('width: 100%; justify-content: space-between;'):
-#                 with ui.column():
-#                     self.name_label = ui.label().bind_text_from(self, 'name').style('font-size: 1.3em; font-weight: bold; color: #333;')
-#                 with ui.column():
-#                     with ui.row():
-#                         ui.label('Display Order:').style('font-size: 1.3em; font-weight: bold; color: #333;')
-#                         ui.label().bind_text_from(self, 'display_order').style('font-size: 1.3em; font-weight: bold; color: #333;')  # Ensure position updates in UI

@@ -13,7 +13,7 @@ import httpx
 from nicegui import ui, app, run
 from fastapi import Request
 
-from client import Client
+from client.src.clio_manage_python_client.client import Client
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -102,14 +102,17 @@ def create_client_session(api_key=""):
 def update_custom_field_display_order(client:Client, field_id, new_position):
     field_id=str(field_id)
     new_position=str(new_position)
+    print(client)
+    print(field_id)
+    print(new_position)
     try:
-        response = {"Success": True}
         response = client.patch.custom_fields(id=field_id, display_order=new_position, fields='all')
         
         logging.info(json.dumps(response, indent=2))
         return response
     
     except Exception as e:
+        print(e)
         logging.debug(f"An error occurred: {e}")
 
 def get_custom_field(client:Client=None, **kwargs):
@@ -147,6 +150,7 @@ def get_custom_field_sets(client:Client=None, parent_type="Matter"):
         logging.debug(f"An error occurred: {e}")
 
 def update_custom_field(client, field_id, **kwargs):
+    print(kwargs)
     try:
         response = client.patch.custom_fields(id=field_id, fields="all", **kwargs)
         print(response)
@@ -185,6 +189,19 @@ def create_custom_field(client, **kwargs):
     kwargs.setdefault('parent_type', 'matter')
     try:
         response = client.post.custom_fields(**kwargs)
+        print(response)
+        logging.debug(json.dumps(response, indent=2))
+        return True
+    
+    except Exception as e:
+        logging.debug(f"An error occurred: {e}")
+        return False
+    
+def create_custom_field_set(client, **kwargs):
+    kwargs.setdefault('fields', 'all')
+    kwargs.setdefault('parent_type', 'matter')
+    try:
+        response = client.post.custom_field_sets(**kwargs)
         print(response)
         logging.debug(json.dumps(response, indent=2))
         return True
