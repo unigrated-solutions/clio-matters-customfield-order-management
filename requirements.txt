@@ -4,3 +4,4 @@ typing-inspect
 httpx
 pywebview
 pandas
+clio-manage-api-client

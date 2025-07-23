@@ -13,7 +13,7 @@ import httpx
 from nicegui import ui, app, run
 from fastapi import Request
 
-from client.src.clio_manage_python_client.client import Client
+from clio_manage_python_client import Clio_Manage as Client
 
 logging.basicConfig(level=logging.DEBUG)
 
