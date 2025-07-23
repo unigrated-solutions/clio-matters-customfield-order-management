@@ -4,7 +4,7 @@ import logging
 from nicegui import ui, app, binding
 from nicegui.events import KeyEventArguments
 
-from api import *
+from .api import *
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -164,8 +164,8 @@ class EventHandler:
         self.page_container = None
         self.api_client = create_client_session()
         self.parent_type = parent_type
-        self.field_handler = None
-        self.field_set_handler = None
+        self.field_container = None
+        self.field_set_container = None
         
         self.custom_field_cards = []
         self.mousedown = False
@@ -183,16 +183,16 @@ class EventHandler:
         self.api_token:str = None
         self.field_filter_element = None
         
-    def init_handlers(self, page_container):
-        field_set_handler = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
-        field_handler = CustomFieldsHandler(event_handler=self, field_set_handler=field_set_handler, parent_type=self.parent_type)
-        field_set_handler.update_field_handler(field_handler)
+    def init_containers(self, page_container):
+        field_set_container = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
+        field_container = CustomFieldsContainer(event_handler=self, field_set_handler=field_set_container, parent_type=self.parent_type)
+        field_set_container.update_field_handler(field_container)
         
-        self.field_handler = field_handler
-        self.field_set_handler = field_set_handler
+        self.field_container = field_container
+        self.field_set_container = field_set_container
         
         self.page_container = page_container
-        return self.field_handler, self.field_set_handler
+        return self.field_container, self.field_set_container
     
     def update_access_token(self, api_key):
         ui.notify(f'Setting Access Token')
@@ -315,11 +315,12 @@ class EventHandler:
         
     def set_field_filter_element(self, element):
         self.field_filter_element = element
-class CustomFields:
-    def __init__(self, field_data, event_handler: EventHandler, field_handler):
-        self.event_handler = event_handler
-        self.field_handler = field_handler
-        self.field_data = field_data
+        
+# class CustomFields:
+#     def __init__(self, field_data, event_handler: EventHandler, field_handler):
+#         self.event_handler = event_handler
+#         self.field_handler = field_handler
+#         self.field_data = field_data
 
 class CustomFieldCard:
     """A reusable card component for displaying and filtering custom fields."""
@@ -377,9 +378,7 @@ class CustomFieldCard:
             
         with self.card:
             with ui.context_menu().props('auto-close'):
-                # Always Show
-                # ui.menu_item('Copy Id', self.copy_id)
-                
+
                 # Only show these when more than one field is selected
                 ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before")) \
                     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
@@ -468,10 +467,6 @@ class CustomFieldCard:
             self.deselect_card()
         else:
             self.select_card()
-        
-    # async def copy_id(self):
-    #     ui.run_javascript(f'navigator.clipboard.writeText("{self.id}")')
-    #     ui.notify('Copied to clipboard')
     
     def select_card(self):
         """Select this card and update its background color."""
@@ -731,7 +726,7 @@ class CustomFieldSetsHandler:
         if response:
             ui.notify(f'Field Created: {kwargs}')
         
-class CustomFieldsHandler:
+class CustomFieldsContainer:
     def __init__(self, event_handler:EventHandler=None, field_set_handler:CustomFieldSetsHandler=None, parent_type:str = None):
         
         self.event_handler:EventHandler = event_handler
