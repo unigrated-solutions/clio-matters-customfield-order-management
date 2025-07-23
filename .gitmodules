@@ -1,3 +1,0 @@
-[submodule "client"]
-	path = client
-	url = https://github.com/unigrated-solutions/clio-api-python-client.git
