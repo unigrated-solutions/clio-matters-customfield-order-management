@@ -1,5 +1,5 @@
 # PyGObject==3.50.0
-nicegui==2.22.1
+nicegui==2.22.2
 typing-inspect
 httpx
 pywebview
