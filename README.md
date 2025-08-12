@@ -1,4 +1,5 @@
-This is a **locally run web-based application** built with [NiceGUI](https://github.com/zauberzeug/nicegui) to manage **Customfields** and **Customfield Sets**.
+# Update:
+We're in the process of merging the clio repositories into a central dashboard that will work within our unigrated framework as well a function as independant standalone applications. The goal is to keep these utilties functional on their own, but at some point this may not be possible. The readme may not be up to date so please review the commit changes
 
 ## Interface Interactions:
 - Esc: Clear selected fields
@@ -30,3 +31,6 @@ This is a **locally run web-based application** built with [NiceGUI](https://git
 ## Duplicate Field
 ![](screenshots/context_menu1.png)
 ![](screenshots/duplicate_field.png)
+
+## About:
+- This is a **locally run web-based application** built with [NiceGUI](https://github.com/zauberzeug/nicegui) to manage **Customfields** and **Customfield Sets**.

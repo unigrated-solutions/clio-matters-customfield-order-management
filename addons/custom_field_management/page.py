@@ -1,119 +1,143 @@
-from nicegui import ui, app
 import logging
 
+from nicegui import ui, app
+
+from .elements import api_input, toggle_deleted_fields, FieldContainer, FieldSetContainer
+from .dialogs import launch_field_set_dialog, fix_field_display_order_dialog, loading_dialog
+from .events import *
+from .styles import styles
+from .helper import get_deleted_custom_field_ids
+from layout.page import get_header_containers
+
+from clio_manage_python_client import ClioManage as API_Connection
+
 logging.basicConfig(level=logging.DEBUG)
-
-from .elements import EventHandler, AppElementVisibility
-from layout import load_layout, get_tool_menu
-
-def check_storage():
+                    
+async def customfield_management_page(parent_type):
     
-    if not app.storage.general.get('matter_custom_fields'):
-        app.storage.general['matter_custom_fields'] = []
-    if not app.storage.general.get('matter_custom_field_sets'):
-        app.storage.general['matter_custom_field_sets'] = []
+    current_page = 'customfield_management'
+    current_user = app.storage.user['current_user']
+    parent_type = parent_type
+    field_set_container = None
+    field_container = None
+    key_input = None
+    ui.add_css(styles)
+    ui.keyboard(on_key=handle_key_event)
+            
+    api_client = API_Connection(access_token='', store_responses=False, async_requests=False)
+    center_container, right_container = get_header_containers()
+    with right_container:
+        def update_client_key(new_access_token):
+            api_client.set_bearer_token(new_access_token)
+            ui.notify('Access Token Set')
+            
+        right_container.clear()
+        key_input:ui.input = api_input(current_user, callback=update_client_key)
         
-    if not app.storage.general.get('contact_custom_fields'):
-        app.storage.general['contact_custom_fields'] = []
-    if not app.storage.general.get('contact_custom_field_sets'):
-        app.storage.general['contact_custom_field_sets'] = []
-        
-def add_to_tool_menu(event_handler):
-    tool_menu = get_tool_menu()
-    with tool_menu:
-        with ui.menu_item('Custom Field Management', auto_close=False):
-            with ui.item_section().props('side'):
-                ui.icon('keyboard_arrow_right')
-            with ui.menu().props('anchor="top end" self="top start" auto-close'):
-                ui.menu_item('Matters', on_click= lambda: event_handler.set_parent_type('matter'))
-                ui.menu_item('Contacts', on_click= lambda: event_handler.set_parent_type('contact'))
-
-@ui.page("/customfield_management")
-async def customfield_management_page():
-        
-    check_storage()
+    with center_container:
+        center_container.clear()
+        ui.label(f'{parent_type.title()} Custom Fields')
     
-    ui.query('.nicegui-content').classes('p-0 m-0 gap-0')
+    global_storage = app.storage.general['customfield_management_storage']
+    
+    app.storage.client['field_parent_type'] = parent_type
+    app.storage.client['last_clicked'] = None
+    app.storage.client['selected_fields'] = []
+    app.storage.client['fields'] = {}
+    app.storage.client['field_set_cards'] = {}
+    
     await ui.context.client.connected()
+    loading = loading_dialog()
+    app.storage.user['last_page'] = f'/customfield_management/{parent_type}'
     
-    app.storage.client['fields'] = []
-    app.storage.client['field_set_cards'] = []
-    parent_type = app.storage.general.get('parent_type', "matter")
+    app.storage.tab['current_page'] = current_page
+    app.storage.tab['custom_field_management_api'] = api_client
     
-    event_handler = EventHandler(parent_type)
-    visibility_handler = AppElementVisibility()
-    app.storage.client['visibility_handler'] = visibility_handler
-
-    # ui.add_body_html('''
-    #     <script>
-    #         document.addEventListener('DOMContentLoaded', () => {
-    #             document.body.style.userSelect = 'none';
-    #         });
-    #     </script>
-    #     ''')
-    load_layout(event_handler)
-    add_to_tool_menu(event_handler)
+    async def load_field_storage():
+        await field_container.load_from_api(api_client)
+        await field_set_container.load_from_api()    
+        
+    app.storage.client['load_field_storage'] = load_field_storage
     
-    with ui.row().style('width: 100%; height: calc(100vh - 50px); margin: 0; padding: 5px 2px; display: flex;') as page_container:
-        field_handler, field_set_handler = event_handler.init_containers(page_container)
-        page_container.on('dblclick', event_handler.deselect_all_fields)
+    with ui.row().classes('page-container') as page_container:
         
         # Left Section - Custom Field Sets
-        with ui.column().style('flex: 1; gap: 0; height: 100%; padding: 10; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke'):
-            ui.label('Custom Field Sets').classes('w-full text-2xl bg-white font-bold border border-gray-300 p-2 rounded text-center')
-            
+        with ui.column().classes('full-height-container') as fieldset_outer_container:
+        
+            ui.label('Custom Field Sets').classes(
+                'w-full text-2xl font-bold p-2 rounded text-center shadow-sm text-black'
+            ).style(
+                'background-color: #eff6ff; border: 1px solid #bfdbfe; '
+            )
             # Scroll Area for Custom Field Sets
-            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0; '
-                                        'border-radius: 5px; border: 2px solid #ccc; padding: 0;'):
-                field_set_handler.load()
+            with ui.scroll_area().classes('scroll-container'):
+                field_set_container = FieldSetContainer(parent_type=parent_type)
                 
-            with ui.row().classes('w-full items-center').style('justify-content: space-between; padding: 5px 2px; flex-wrap: wrap; gap: 8px; background-color: white;'):
-                ui.input(placeholder="Filter by name...").style(
-                    'flex: 1 1 200px; min-width: 150px; max-width: 300px; '
-                    'border-radius: 5px; border: 2px solid #ccc; padding: 0;'
-                    ).props('dense size=32').disable()
+            with ui.row().classes('column-footing'):
+                ui.input(placeholder="Filter by name...").classes('filter-box').props('dense size=32').disable()
+                
                 with ui.row():
-                    ui.button(icon='add', on_click=field_set_handler.show_field_set_creation_dialog)
-                    ui.button(icon='refresh', on_click=lambda: field_set_handler.load_from_api()).disable()
-
+                    ui.button(icon='add', on_click=launch_field_set_dialog)
+                    
         ui.separator().style('height: 100%; width: 2px; flex-shrink: 0;')
 
-
         # Right Section - Custom Fields
-        with ui.column().style(
-            'flex: 1; gap: 0; height: 100%; padding: 0; margin: 0; display: flex; flex-direction: column; background-color: WhiteSmoke; '
+        with ui.column().classes('full-height-container') as field_outer_container:
+            with ui.row().classes('relative w-full items-center border-2 border-gray-300 p-2 rounded').style(
+                'background-color: #eff6ff; border: 1px solid #bfdbfe; '
             ):
-            ui.label('CustomFields').classes('w-full text-2xl bg-white font-bold border border-gray-300 p-2 rounded text-center')
-            
-            # Scroll area for cards
-            with ui.scroll_area().style('flex: 1; width: 100%; padding: 0; margin: 0; '
-                                        'border-radius: 5px; border: 2px solid #ccc; padding: 0;'):
-                field_handler.load()
                 
+                # Absolutely centered label
+                ui.label('Custom Fields').classes('text-2xl font-bold absolute left-1/2 transform -translate-x-1/2')
+
+                # Right-aligned dropdown
+                with ui.row().classes('ml-auto'):
+                    with ui.dropdown_button():
+                        with ui.column().classes('p-4'):
+                            delete_switch = ui.switch(
+                                'Show Deleted',
+                                value=True,
+                                on_change=lambda: toggle_deleted_fields(delete_switch.value)
+                            )
+                            ui.button('Show Deleted Fields', on_click= lambda: get_deleted_custom_field_ids(parent_type))
+            # Scroll area for cards
+            with ui.scroll_area().classes('scroll-container'):
+                field_container = FieldContainer(parent_type=parent_type, global_storage=global_storage)       
+
             # Filter row with proper wrapping
-            with ui.row().classes('w-full items-center').style('justify-content: space-between; padding: 5px 2px; flex-wrap: wrap; gap: 8px; background-color: white;'):
+            with ui.row().classes('column-footing'):
 
                 def filter_fields():
-                    search_text = custom_field_filter.value
+                    search_text = custom_field_filter.value.strip().lower()
                     logging.debug(f"Filtering with: {search_text}")
-                    for card in app.storage.client['fields']:
-                        card.update_visibility(search_text)
-                        
+
+                    field_cards = app.storage.client.get('fields', {})
+
+                    for card in field_cards.values():
+                        if hasattr(card, 'update_visibility'):
+                            card.update_visibility(search_text)
+                        else:
+                            logging.warning(f"Card {getattr(card, 'clio_id', 'unknown')} does not support visibility filtering.")
+                            
                 custom_field_filter = ui.input(
                     placeholder="Filter fields by name...",
-                    on_change=filter_fields
-                ).style(
-                    'flex: 1 1 200px; min-width: 150px; max-width: 300px; '
-                    'border-radius: 5px; border: 2px solid #ccc; padding: 0;'
-                ).props('dense size=32')
-                
-                event_handler.set_field_filter_element(custom_field_filter)
-                
-                if not app.storage.client.get('display_deleted'):
-                    app.storage.client['display_deleted'] = False
+                    on_change=filter_fields,
+                ).classes('filter-box').props('dense size=32')
+                with custom_field_filter.add_slot('prepend'):
+                    ui.icon('search')
+                    
+                with custom_field_filter.add_slot('append'):
+                    clear_icon = ui.icon('clear').classes('clear-icon') 
+                    clear_icon.on('click', lambda: custom_field_filter.set_value(''))
+        
                 with ui.row():
-                    toggle_deleted_field = ui.switch("Show Deleted").bind_value_to(visibility_handler, 'display_deleted').props('dense')
-                    toggle_details = ui.switch("Show Details").bind_value_to(visibility_handler, 'display_field_details').props('dense')
-                with ui.row():
-                    ui.button(icon='add', on_click=field_handler.show_field_creation_dialog)
-                    ui.button(icon='refresh', on_click=lambda: field_handler.load_from_api())
+                    ui.button(icon='add', on_click=launch_field_dialog)
+                    ui.button(icon='refresh', on_click= lambda: load_field_storage())
+
+    if key_input.value:
+        await load_field_storage()
+    
+    if custom_field_filter.value:
+        filter_fields()
+        
+    loading.close()

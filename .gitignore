@@ -173,3 +173,5 @@ cython_debug/
 customfield_sets.json
 customfields.json
 .nicegui/
+archive/
+*.backup

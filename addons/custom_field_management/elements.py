@@ -1,924 +1,589 @@
-import time
+# from __future__ import annotations
+from typing import TYPE_CHECKING
+from collections import OrderedDict
+
 import logging
 
-from nicegui import ui, app, binding
-from nicegui.events import KeyEventArguments
+from nicegui import ui, app, run
 
 from .api import *
-
+from .dialogs import confirm_dialog, fix_field_display_order_dialog, launch_field_dialog
+from .helper import get_matters_containing_field
 logging.basicConfig(level=logging.DEBUG)
-
-@binding.bindable_dataclass
-class AppElementVisibility:
-    display_delete:bool = False
-    display_field_details:bool = False
     
+def api_input(user, callback) -> ui.input:
+    key_storage = app.storage.general.setdefault('customfield_management_storage', {}).setdefault('clio_api_keys', {})
+    current_user = user
     
-async def confirm_dialog(message: str = "Are you sure?") -> ui.dialog:
-    def key_press(e: KeyEventArguments):
-        if e['key'] == 'Enter':
-            dialog.submit(True)
-        elif e['key'] == 'Escape':
-            dialog.submit(False)
-            
-    with ui.dialog() as dialog, ui.card():
-        ui.label(message).classes('text-lg').style('white-space: pre-line')
-
-        with ui.row().classes('justify-end'):
-            ui.button('Cancel', on_click=lambda: dialog.submit(False)).props('flat')
-            ui.button('Confirm', on_click=lambda: dialog.submit(True)).props('color=primary')
-
-        # Handle keyboard shortcuts
-        dialog.on('keydown', lambda e: key_press(e.args))
-
-    dialog.open()
-    result = await dialog
-    return result
+    async def copy_token(selected_token):
+        ui.run_javascript(f'navigator.clipboard.writeText({json.dumps(selected_token)})')
+        ui.notify('Copied to clipboard')
     
-# class ExpandableRightDrawer(ui.right_drawer):
-#     def __init__(self, event_handler):
-#         super().__init__(bordered=True)
-        
-#         self.event_handler = event_handler
-#         self.expanded = False  # track the state
-
-#         # Create the drawer
-#         with self.props('width=50, behavior=desktop').style(self.get_drawer_style()):
-            
-#             self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
-#             with self.toggle_row:
-#                 self.toggle_button = ui.button(on_click=self.toggle).style('''
-#                     width: 40px;
-#                     height: 40px;
-#                     min-width: 40px;
-#                     padding: 0;
-#                     margin: 0;
-#                 ''')
-#                 ui.separator()
-#                 self.update_button_icon()
-                
-                
-#             with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
-
-#                 self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
-#                     font-weight: bold;
-#                     color: white;
-#                     text-transform: capitalize;
-#                     background-color: #1976d2;
-#                     border: 1px solid #ccc;
-#                     border-radius: 4px;
-#                 ''')
-                                
-#                 with self.parent_type_menu:
-#                     with ui.menu():
-#                         ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
-#                         ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
+    access_token = ui.input(
+        placeholder="Enter Access Token...",
+        password=True,
+        password_toggle_button=True
+    ).props('v-model="text" dense="dense" size=48').style(
+        'width: 250px; border-radius: 5px; '
+        'background-color: white; color: #333; padding-left: 12px;'
+    ).bind_value(key_storage, user)
     
-#                 # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
-#                 ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
+    # Using to update the API client
+    if callback:
+        access_token.on('change', lambda: callback(access_token.value))
+        if access_token.value:
+            callback(access_token.value)
+            
+            
+    copy_button = ui.button(icon="content_copy").classes('header-button')
+    copy_button.on('click', lambda: copy_token(access_token.value))
+    ui.button(icon='help_center').classes('header-button').disable()
+    return access_token
+        
+async def toggle_deleted_fields(value: bool):
+    """Toggle visibility of all deleted custom fields."""
+
+    def get_deleted_custom_field_ids() -> list[str]:
+        """Return a list of custom field IDs where 'deleted' is True."""
+        storage = app.storage.general.get('customfield_management_storage', {})
+        custom_field_data = storage.get('custom_field_data', {})
+
+        return [
+            field_id
+            for field_id, data in custom_field_data.items()
+            if isinstance(data, dict) and data.get('deleted') is True
+        ]
+
+    def toggle_visibility(field_id: str, visible: bool):
+        try:
+            field_card: FieldCard = app.storage.client['fields'].get(int(field_id))
+            if field_card:
+                field_card.set_visibility(visible)
+            # else:
+            #     ui.notify(f'FieldCard not found for ID: {field_id}')
+        except Exception as e:
+            ui.notify(f'Error updating field {field_id}: {e}')
+
+    deleted_fields = get_deleted_custom_field_ids()
+    for field_id in deleted_fields:
+        toggle_visibility(field_id, value)
+
+class FieldLabel(ui.label):
+    def __init__(self, clio_id) -> None:
+        super().__init__()
+        self.clio_id = str(clio_id)
+        self.name: str = None
+        self.deleted: bool = False
+        
+        self.style('font-size: 1.3em; font-weight: bold; color: #333;')
+        self.data = app.storage.general["customfield_management_storage"]["custom_field_data"][self.clio_id]
+        self.refresh()
+
+    def update_label(self, name):
+        try:
+            self.set_text(name)
+        except Exception:
+            self.set_text(f"ERROR{self.clio_id}")
+        
+    def refresh(self):
+        try:
+            self.name = self.data.get('name')
+            self.deleted = self.data.get('deleted')
+            label_name = f'{self.name} (Deleted)' if self.deleted else self.name
+            self.set_text(label_name)
+        except Exception:
+            self.set_text(f"ERROR{self.clio_id}")
     
-#     async def load(self):
-#         self.toggle_row = ui.row().classes('w-full').style(self.get_toggle_row_style())
-#         with self.toggle_row:
-#             self.toggle_button = ui.button(on_click=self.toggle).style('''
-#                 width: 40px;
-#                 height: 40px;
-#                 min-width: 40px;
-#                 padding: 0;
-#                 margin: 0;
-#             ''')
-#             ui.separator()
-#             self.update_button_icon()
-            
-            
-#         with ui.column().style('gap: 8px;').bind_visibility_from(self, 'expanded').style('align-items: center;').classes('w-full') as self.contents:
-
-#             self.parent_type_menu = ui.button(f'{self.event_handler.parent_type.capitalize()} Custom Fields', icon='expand_more', on_click=None).style('''
-#                 font-weight: bold;
-#                 color: white;
-#                 text-transform: capitalize;
-#                 background-color: #1976d2;
-#                 border: 1px solid #ccc;
-#                 border-radius: 4px;
-#             ''')
-                            
-#             with self.parent_type_menu:
-#                 with ui.menu():
-#                     ui.menu_item('Matter Custom Fields', on_click=lambda: self.set_parent_type('matter'))
-#                     ui.menu_item('Contacts Custom Fields', on_click=lambda: self.set_parent_type('contact'))
-
-#             # ui.button('Show Confirmation', on_click=lambda: await confirm_dialog("Do you want to proceed?"))
-#             ui.button("Create Field", on_click=lambda: self.event_handler.field_handler.create_field())
-            
-#     async def set_parent_type(self, type):
-#         await self.event_handler.set_parent_type(type)
-#         self.parent_type_menu.set_text(f'{self.event_handler.parent_type.capitalize()} Custom Fields')
-        
-#     def get_drawer_style(self) -> str:
-#         if self.expanded:
-#             return '''
-#                 transition: width 0.3s ease;
-#                 padding-top: 12px;
-#                 padding-left: 12px;
-#                 padding-right: 12px;
-#                 align-items: center;
-#             '''
-#         else:
-#             return '''
-#                 transition: width 0.3s ease;
-#                 padding-top: 12px;
-#                 padding-left: 0px;
-#                 padding-right: 0px;
-#             '''
-        
-#     def get_toggle_row_style(self) -> str:
-#         return '''
-#             justify-content: flex-start;
-#         ''' if self.expanded else '''
-#             justify-content: center;
-#         '''
-        
-#     def toggle(self):
-#         self.expanded = not self.expanded
-
-#         # Update width using props (the last one wins)
-#         new_width = '300' if self.expanded else '50'
-#         self.props(f'width={new_width}').style(self.get_drawer_style())
-
-#         # Update toggle row alignment
-#         self.toggle_row.style(self.get_toggle_row_style())
-
-#         self.update_button_icon()
-
-#     def update_button_icon(self):
-#         self.toggle_button.props(f"icon={'chevron_right' if self.expanded else 'chevron_left'}")
-
-#     async def refresh(self):
-#         width = '300' if self.expanded else '50'
-#         self.props(f'width={width}').style(self.get_drawer_style())
-        
-class EventHandler:
-    fields_selected_count = binding.BindableProperty()
-    def __init__(self, parent_type):
-        
-        self.page_container = None
-        self.api_client = create_client_session()
-        self.parent_type = parent_type
-        self.field_container = None
-        self.field_set_container = None
-        
-        self.custom_field_cards = []
-        self.mousedown = False
-        self.shift_down = False
-        self.ctrl_down = False
-        self.keyboard = ui.keyboard(on_key=self.handle_key)
-
-        self.last_card_clicked = None
-        self.last_card_click_timestamp = 0
-        
-        self.is_editing_field = False
-        self.editing_field = None
-
-        self.fields_selected_count = 0
-        self.api_token:str = None
-        self.field_filter_element = None
-        
-    def init_containers(self, page_container):
-        field_set_container = CustomFieldSetsHandler(event_handler=self, parent_type=self.parent_type)
-        field_container = CustomFieldsContainer(event_handler=self, field_set_handler=field_set_container, parent_type=self.parent_type)
-        field_set_container.update_field_handler(field_container)
-        
-        self.field_container = field_container
-        self.field_set_container = field_set_container
-        
-        self.page_container = page_container
-        return self.field_container, self.field_set_container
+class FieldCard(ui.card):
     
-    def update_access_token(self, api_key):
-        ui.notify(f'Setting Access Token')
-        self.api_client.set_bearer_token(api_key)
-    
-    def set_custom_field_cards(self, field_cards: list):
-        self.custom_field_cards = field_cards
-
-    def set_shift(self, position: bool):
-        self.shift_down = position
-
-    def set_ctrl(self, position: bool):
-        self.ctrl_down = position
-
-    async def handle_key(self, e: KeyEventArguments):
-        # print(e.key)
-        if e.key == 'Shift':
-            if e.action.keydown:
-                # ui.notify('Shift Down')
-                self.shift_down = True
-            if e.action.keyup:
-                self.shift_down = False
-                # ui.notify('Shift Up')
+    def __init__(self, clio_id: str) -> None:
+        super().__init__()
         
-        if e.key == 'Control':
-            if e.action.keydown:
-                # ui.notify('Control Down')
-                self.ctrl_down = True
-            if e.action.keyup:
-                self.ctrl_down = False
-                # ui.notify('Control Up')
+        self.field_list: list = app.storage.client.setdefault('field_list', [])
+        self.field_list.append(self)
 
-        if e.key == "Escape":
-            self.deselect_all_fields()
+        self.field_dict: dict = app.storage.client.setdefault('field_dict', {})
+        self.field_dict[clio_id] = self
+        
+        self.selected_fields:list = app.storage.client['selected_fields']
+        
+        self.clio_id = str(clio_id)
+        self.tight().classes('field-card').props('draggable')
+        self.last_click = 0
+        self.selected = False
+        self.content = None
+        self.updating_name=False
+        
+        self.reload_content()
+        
+        self.on('click', self.click)
+        self.on('dblclick', self.edit)
+        self.on('contextmenu', lambda: ui.notify(self.clio_id))
+        # self.on('dragstart', lambda e: ui.notify(e))
+        # self.on('dragend', lambda e: ui.notify(e))
+        # self.on('dragover.prevent', lambda e: ui.notify(e))
+        # self.on('dragenter.prevent', lambda e: ui.notify(e))
+
+    def get_parent(self):
+        field_container:FieldContainer = app.storage.client.get('field_container')
+        field_container.move_selected_cards(self.clio_id, position="before")
             
-        # WARNING field will show as "deleted" in Clio's "modify order" tool
-        if e.key == 'Delete' and e.action.keydown:
-            await self.field_handler.delete_custom_fields()
-        
-        if e.key == 'd' and self.ctrl_down and e.action.keydown:
-            self.toggle_display_deleted()   
-        
-        if e.key == 'n' and self.ctrl_down and e.action.keydown:
-            await self.field_handler.show_field_creation_dialog()
-            
-        if e.key == 'F2' and e.action.keydown:
-            if self.fields_selected_count == 1:
-                self.last_card_clicked.toggle_name_changing()
-        
-        else:
-            print(e.key)
-            print(self.fields_selected_count)
-            
-    def handle_card_click(self, custom_field_card):
-        
-        # Save the previous clicked card before updating
-        last_card = self.last_card_clicked  
-        last_cards_position = last_card.display_order if last_card else None 
-        # Update the last clicked card and timestamp
-        self.last_card_clicked = custom_field_card
-
-        # Deselect all if no modifier keys are held
-        if not self.ctrl_down and not self.shift_down and custom_field_card != last_card:
-            # print("Deselecting all")
-            self.deselect_all_fields()
-              
-        # If Shift is held and a previous card exists, select the range
-        elif self.shift_down and last_cards_position is not None:
-            current_card_position = custom_field_card.display_order
-            if last_cards_position != current_card_position:  # Ensure it's a different card
-                selection_range = self.generate_selection_range(last_cards_position, current_card_position)
-                self.select_cards_from_range(selection_range)
-                self.increment_field_count()  
-
-        if custom_field_card == last_card and last_card.selected:
-            self.decrement_field_count()
-            
-        else:
-            self.increment_field_count()            
-            
-    def increment_field_count(self):
-        self.fields_selected_count += 1
-        
-    def decrement_field_count(self):
-        self.fields_selected_count = max(0, self.fields_selected_count - 1)
-
-    def generate_selection_range(self,number1, number2):
-        """Generates a range excluding both number1 and number2."""
-        if number1 < number2:
-            return range(number1 + 1, number2)  # Excludes both ends
-        elif number1 > number2:
-            return range(number1 - 1, number2, -1)  # Excludes both ends
-        return []  # If both numbers are the same, return an empty range
-
-    def select_cards_from_range(self, valid_range):
-        for card in self.custom_field_cards:
-            # print(card.display_order)
-            if card.display_order in valid_range:
-                card.select_card()
-
-    def deselect_all_fields(self):
-        for card in self.custom_field_cards:
-            card.deselect_card()
-    
-        self.fields_selected_count = 0
-        
-    def do_nothing(self):
-        pass
-    
-    def toggle_display_deleted(self):
-        app.storage.client["display_deleted"] = not app.storage.client.get("display_deleted", False)
-                    
-    async def toggle_parent_type(self):
-        self.parent_type= "contact" if self.parent_type == "matter" else "matter"
-        await self.field_handler.load_from_storage()
-
-    async def set_parent_type(self, type):
-        self.parent_type= type
-        await self.field_handler.load_from_storage()
-        
-    def set_field_filter_element(self, element):
-        self.field_filter_element = element
-        
-# class CustomFields:
-#     def __init__(self, field_data, event_handler: EventHandler, field_handler):
-#         self.event_handler = event_handler
-#         self.field_handler = field_handler
-#         self.field_data = field_data
-
-class CustomFieldCard:
-    """A reusable card component for displaying and filtering custom fields."""
-    id = binding.BindableProperty()
-    name = binding.BindableProperty()
-    field_type = binding.BindableProperty()
-    parent_type = binding.BindableProperty()
-    displayed = binding.BindableProperty()
-    deleted = binding.BindableProperty()
-    display_order = binding.BindableProperty()
-    picklist_options = binding.BindableProperty()
-    updating_name = binding.BindableProperty()
-    
-    def __init__(self, field_data:dict, event_handler: EventHandler, field_handler):
-        """Initialize the card with field data."""
-        
-        
-        self.event_handler = event_handler
-        self.field_handler = field_handler
-        self.field_data = field_data
-        self.selected = False 
-        self.updating_name = False
-        self.updating = False
-        
-        self.name_change = None
-        self.last_click= time.time()
-        
-        # Bind name and position dynamically from field data
-        self.id = self.field_data["id"]
-        self.name = self.field_data["name"]
-        self.parent_type = self.field_data.get("parent_type", "").lower()
-        self.field_type = self.field_data['field_type']
-        self.displayed = self.field_data['displayed'] #Default in clio
-        self.deleted = self.field_data["deleted"]
-        self.required = self.field_data['required']
-        self.display_order = self.field_data["display_order"]
-        
-        self.visibility_handler = app.storage.client['visibility_handler']
-        
-        if self.field_data.get('picklist_options'):
-            self.picklist_options = self.field_data['picklist_options']
-        else:
-            self.picklist_options = None
-        
-        # Create a card with default styles
-        self.card = ui.card().tight().style('width: 100%; cursor: pointer; transition: background-color 0.3s; padding: 5px;')
-        
-        self.label_style = 'font-size: 1.3em; font-weight: bold; color: #333;'
-        self.labels = []
-        
-        if self.deleted:
-            self.name += (": (Deleted)")
-            self.card.bind_visibility_from(self.visibility_handler, 'display_deleted')
-            # self.card.bind_visibility_from(self.event_handler.field_filter_element, 'value', backward=lambda: self.name in 'value')
-            
-        with self.card:
+    def reload_content(self):
+        self.clear()
+        with self:
+            self.content = FieldLabel(self.clio_id)
+            duplicate_menu = None
             with ui.context_menu().props('auto-close'):
 
                 # Only show these when more than one field is selected
-                ui.menu_item("Insert Above", lambda: self.field_handler.move_selected_cards(self.id, "before")) \
-                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
-                ui.menu_item("Insert Below", lambda: self.field_handler.move_selected_cards(self.id, "after")) \
-                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: v >= 1 and not self.selected)
-                
+                ui.menu_item("Insert Above", lambda: app.storage.client['field_container'].move_selected_cards(self.clio_id, "before"))
+                ui.menu_item("Insert Below", lambda: app.storage.client['field_container'].move_selected_cards(self.clio_id, "after"))   
+            
                 # Only show these when less than two field is selected
-                ui.menu_item("Duplicate", on_click=self.duplicate_field) \
+                duplicate_menu = ui.menu_item("Duplicate") \
                     .bind_visibility_from(
-                        self.event_handler,
-                        'fields_selected_count',
-                        backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
-                    )
+                        app.storage.client,
+                        'selected_fields',
+                        backward=lambda v: (len(v) == 1 and self.selected) or (len(v) == 0 and not self.selected)
+                        )
+                
+                duplicate_menu.on('click', self.duplicate_field)
+                ui.menu_item('Get Containing matters', on_click= lambda: get_matters_containing_field(self.clio_id))
                 # ui.menu_item("Copy", on_click=lambda: ui.notify(self.to_dict())) \
                 #     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected)
                 #     )
                     
-                ui.menu_item("Create Field Above", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order -1)) \
-                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
+                # ui.menu_item("Create Field Above", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order -1)) \
+                #     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
                 
-                ui.menu_item("Create Field Below", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order +1)) \
-                    .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
-                    
-            with ui.row().style('width: 100%; justify-content: space-between; align-items: center;'):
-                with ui.column():
-                    self.name_label = ui.label().bind_text_from(self, 'name').style(self.label_style).bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
-                    self.labels.append(self.name_label)
-                    
-                    self.name_change = ui.input(value=self.name).props('autofocus v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').style(self.label_style)
-                    self.name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
-                    self.name_change.on('keydown.escape', self.toggle_name_changing)
-                
+                # ui.menu_item("Create Field Below", on_click=lambda: self.field_handler.show_field_creation_dialog(display_order=self.display_order +1)) \
+                #     .bind_visibility_from(self.event_handler, 'fields_selected_count', backward=lambda v: (v == 1 and self.selected) or (v == 0 and not self.selected) )
+                           
+    async def edit(self):
+        try:
+            kwargs = app.storage.general['customfield_management_storage']["custom_field_data"][self.clio_id]
+            kwargs['id'] = self.clio_id
+
+            await launch_field_dialog(method='patch', **kwargs)
+            self.reload_content()
+            await self.update()
+        except Exception as e:
+            logging.debug(e)
+        finally:
+            return
+        
+    def update_content(self, e):
+        ui.notify(e.sender.value)
+        
+    def refresh(self):
+        self.content.refresh()
+
+    def update_visibility(self, search_text):
+        if search_text not in self.content.text.lower():
+            self.set_visibility(False)
             
-                with ui.row().style('align-items: center; gap: 16px;').bind_visibility_from(self.visibility_handler, 'display_field_details'):
-                    
-                    with ui.row().style('align-items: center; gap: 4px;'):
-                        # self.labels.append(ui.label('Field Type:').style('font-weight: bold;'))
-                        self.labels.append(ui.label().bind_text_from(self, 'field_type').style('font-weight: bold;'))
-                        
-                        # Add click event for selection
-                    # Group 1: Checkboxes
-                    with ui.row().style('align-items: center; gap: 8px;'):
-                        ui.checkbox('Default', on_change= lambda e: self.update_default(e.sender.value) if not self.updating else None).bind_value_from(self, 'displayed')
-                        ui.checkbox('Required', on_change= lambda e: self.update_required(e.sender.value) if not self.updating else None).bind_value_from(self, 'required')
-
-                    # Group 2: Position labels
-                    with ui.row().style('align-items: center; gap: 4px;'):
-                        self.labels.append(ui.label('Position:').style('font-weight: bold;'))
-                        self.labels.append(ui.label().bind_text_from(self, 'display_order'))
-                        # Add click event for selection
+        if search_text in self.content.text.lower() and not self.visible:
+            self.set_visibility(True)
+            
+        if search_text == "" and not self.visible:
+            self.set_visibility(True)
+            
+    async def click(self, e):
+        app.storage.client['last_clicked'] = self
         
-        self.card.on('click', lambda: self.on_click())
-        self.card.on('dblclick', self.toggle_name_changing)
+        if self.updating_name:
+            return
+        
+        alt_pressed = e.args.get('altKey')
+        shift_pressed = e.args.get('shiftKey')
+        ctrl_pressed = e.args.get('ctrlKey')
+        click_type = e.args.get('type')
 
-    def to_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "field_type": self.field_type,
-            "displayed": self.displayed,
-            "deleted": self.deleted,
-            "required": self.required,
-            "display_order": self.display_order,
-            "picklist_options": self.picklist_options,
-        }
+        if not any([ctrl_pressed, shift_pressed, alt_pressed]):
+            selected_fields = self.selected_fields.copy()
+            for field in selected_fields:
+                field.deselect()
 
-    async def duplicate_field(self):
-        data = self.to_dict()
-        data['display_order'] = self.display_order + 1  # or += 1 for safety
+        if shift_pressed and self.selected_fields:
+            try:
+                current_index = self.field_list.index(self)
+                last_selected = self.selected_fields[-1]
+                last_index = self.field_list.index(last_selected)
 
-        # Ensure field_handler is available on the instance
-        await self.field_handler.show_field_creation_dialog(
-            name=data.get('name'),
-            field_type=data.get('field_type'),
-            default=data.get('displayed'),
-            required=data.get('required'),
-            display_order=data.get('display_order'),
-            picklist_options=data.get('picklist_options'),
-        )
-    
-    async def on_click(self):
-        self.last_click = time.time()  # Move this up!
+                start = min(current_index, last_index)
+                end = max(current_index, last_index)
 
-        self.event_handler.handle_card_click(self)
-
-        if self.selected:
-            self.deselect_card()
+                for i in range(start, end + 1):
+                    if self.field_list[i].visible:
+                        self.field_list[i].select()
+            except ValueError:
+                # Safety fallback if items are missing
+                self.select()
         else:
-            self.select_card()
-    
-    def select_card(self):
+            if self.selected:
+                self.deselect()
+            else:
+                self.select()
+                
+    def select(self):
         """Select this card and update its background color."""
+        self.selected_fields.append(self)
         self.selected = True
-        self.card.style('background-color: lightblue;')  # Highlight the card
+        self.style('background-color: lightblue;')
         
-    def deselect_card(self):
+    def deselect(self):
         """Deselect this card and remove highlight."""
         self.selected = False
-        self.card.style('background-color: white;')  # Remove highlight
+        self.style('background-color: white;')  # Remove highlight
         if time.time() > self.last_click + .2:
             self.updating_name= False
+            self.reload_content()
+        if self in self.selected_fields:
+            self.selected_fields.remove(self)
+
+    async def duplicate_field(self):
+        data = app.storage.general["customfield_management_storage"]["custom_field_data"][self.clio_id].copy()
+        data['display_order'] += 1
+        with self:
+            await launch_field_dialog(method='duplicate', **data)
         
-    def update_visibility(self, search_text):
-        """Toggle visibility based on filter input."""
-        self.card.visible = search_text.lower() in self.field_data["name"].lower()
-        logging.debug(f"Card '{self.field_data['name']}' visibility: {self.card.visible}")
+class FieldSetCard(ui.card):
+    def __init__(self, clio_id: str) -> None:
+        super().__init__()
+        self.clio_id = clio_id
 
-    def set_visibility(self, value):
-        self.card.visible = value
-        
-    def update_position(self, new_position):
-        """Update the card's current position dynamically."""
-        self.display_order = new_position
+        self.tight().classes('justify-center border border-gray-200 rounded-md').style('width: 100%; padding: 5px;')
+        with self:
+            # UI Elements
+            self.title = ui.label().classes(
+                'text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1'
+            ).style('background-color: #d1d5db; cursor: pointer')
+            self.card_table = ui.grid(columns=2).classes('w-full gap-3')
 
-    def toggle_name_changing(self):
-        self.updating_name = True if not self.updating_name else False
-        if self.updating_name:
-            self.select_card()
-        
-    def update_name(self, new_name):
-        success = update_custom_field(self.event_handler.api_client, self.id, name=new_name)
-        if success:
-            self.field_data['name'] = new_name
-            self.name = new_name
-            self.updating_name = False
-            ui.notify(f"Successfully updated Name: {new_name}")
-    
-    async def update_default(self, displayed):
-        if self.updating or self.displayed == displayed:
-            return
-        self.updating = True
-        success = update_custom_field(self.event_handler.api_client, self.id, displayed=displayed)
-        if success:
-            # self.field_data['displayed'] = displayed
-            self.displayed = displayed
-            ui.notify(f"Successfully updated Default: {displayed}")
-        self.updating = False
-            
-    async def update_required(self, is_required):
-        if self.updating or self.required == is_required:
-            return
-        self.updating = True
-        success = update_custom_field(self.event_handler.api_client, self.id, required=is_required)
-        if success:
-            # self.field_data['required'] = is_required
-            self.required = is_required
-            ui.notify(f"Successfully updated Required: {is_required}")
-        self.updating = False
-            
-class CustomFieldSetCard:
-    """A reusable card component for displaying and filtering custom fields."""
-    id = binding.BindableProperty()
-    name = binding.BindableProperty()
-    parent_type = binding.BindableProperty()
-    updating_name = binding.BindableProperty()
-    
-    def __init__(self, field_set_data, event_handler):
-        """Initialize the custom field set card with data."""
-        self.field_set_data = field_set_data
-        self.event_handler:EventHandler = event_handler
-        
-        self.id = field_set_data["id"]
-        self.name = field_set_data["name"]
-        self.parent_type = field_set_data.get("parent_type","").lower()
-        self.custom_fields = field_set_data["custom_fields"]  # [{'id': 111}, {'id': 222}, ...]
-        self.selected = False
-        self.name_label = None
-        self.updating_name = False
-        
-        # Lookup full custom field data from global storage
-        all_fields = app.storage.general[f'{self.parent_type}_custom_fields']
-        custom_field_map = {field["id"]: field for field in all_fields if not field.get('deleted', False)}
+            # Data containers
+            self.field_labels: dict[int, ui.label] = {}  # {field_id: label_element}
+            self.field_data_lookup = {}
+            self.field_set_data = {}
 
-        # Filter to get only associated fields, fully populated
-        self.custom_field_data = [
-            custom_field_map[f['id']]
-            for f in self.custom_fields
-            if f['id'] in custom_field_map
-        ]
+            self.load()
 
-        # Sort by display_order
-        self.custom_field_data.sort(key=lambda f: f['display_order'])
-        # Card Layout
-        self.card = ui.card().tight().classes('justify-center border border-gray-300 rounded-md').style('width: 100%; padding: 5px;')
-        self.card.on('keydown', lambda: ui.notify("F2"))
-        self.reorder_custom_fields()  # initial layout call
-
-    def update_name(self, new_name):
-        update_custom_field_set_label(self.event_handler.api_client, self.id, new_name)
-        self.field_set_data['name'] = new_name
-        self.name = new_name
-        self.updating_name = False
-        
-    def selection_toggle(self):
-        if not self.selected:
-            self.selected = True
-            self.name_label.style('background-color: lightblue;')
-            
-        else:
-            self.selected = False
-            self.name_label.style('background-color: whitesmoke;')
-        
-    def toggle_name_changing(self):
-        self.updating_name = True if not self.updating_name else False
-        
-    #This needs to be redone to reorder the element index in the layout rather than clearing and regenerating
-    @ui.refreshable
-    def reorder_custom_fields(self):
-
-        all_fields = app.storage.general[f'{self.parent_type}_custom_fields']
-        custom_field_map = {
-            field['id']: field
-            for field in all_fields
-        }
-
-        # Reconstruct custom_field_data from current storage
-        self.custom_field_data = [
-            custom_field_map[f['id']]
-            for f in self.field_set_data['custom_fields']
-            if f['id'] in custom_field_map
-        ]
-
-        # Sort by updated display_order
-        self.custom_field_data.sort(key=lambda f: f['display_order'])
-
-        self.card.clear()
-        with self.card:
-            # Header label
-            name_change = ui.input(value=self.name).props('v-model="text" dense="dense" size=48').bind_visibility_from(self, 'updating_name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: lightgray;').props('input-class="text-center"')
-            name_change.on('keydown.enter', lambda e: self.update_name(e.sender.value))
-            name_change.on('keydown.escape', self.toggle_name_changing)
-            
-            self.name_label = ui.label().bind_text_from(self, 'name').classes('text-xl font-bold w-full text-center border border-gray-300 rounded px-2 py-1').style('background-color: whitesmoke; cursor: pointer')
-            self.name_label.bind_visibility_from(self, 'updating_name', backward=lambda v: not v)
-            self.name_label.on('dblclick', self.toggle_name_changing)
-            self.name_label.on('click', self.selection_toggle)
-            
-            with ui.grid(columns=2).classes('w-full gap-3'):
-                for field in self.custom_field_data:
-                    # print(field['name'])
-                    label = ui.label(field['name']).classes(
-                        'text-lg font-semibold text-center border rounded p-3 bg-white shadow'
-                    ).style(
-                        'display: flex; align-items: center; justify-content: center; height: 100%; cursor: pointer'
-                    )
-
-                    if field.get('deleted', False):
-                        label.bind_visibility_from(app.storage.client, 'display_deleted')
-
-class CustomFieldSetsHandler:
-    def __init__(self, event_handler=None, field_handler = None, parent_type:str = None):
-        self.event_handler:EventHandler = event_handler
-        self.field_handler = field_handler
-        self.parent_type = parent_type
-        
-        self.layout = None
-        
     def load(self):
-        if not self.layout:
-            self.layout = ui.column().style('width: 100%;')
-            
-        with self.layout:
-            for field_set in app.storage.general.get(f'{self.parent_type}_custom_field_sets'):
-                app.storage.client['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
+        """Generate field labels once and store their elements."""
+        storage = app.storage.general.get('customfield_management_storage', {})
+        self.field_set_data = storage.get('custom_field_set_data', {}).get(self.clio_id, {})
+        self.field_data_lookup = storage.get('custom_field_data', {})
 
-    def update_field_handler(self, new_handler):
-        self.field_handler = new_handler
-        
-    def update_parent_type(self, new_parent_type):
-        self.parent_type = new_parent_type
-        
-    def update_field_sets(self) -> None:
-        app.storage.client['field_set_cards'].clear()
-        self.layout.clear()
-        app.storage.client['field_set_cards'] = []
-        with self.layout:
-            for field_set in app.storage.general[f'{self.parent_type}_custom_field_sets']:
-                app.storage.client['field_set_cards'].append(CustomFieldSetCard(field_set, self.event_handler))
+        if not self.field_set_data:
+            ui.notify(f"⚠️ No field set found for ID {self.clio_id}", color='red')
+            return
 
-    async def load_from_storage(self, parent_type="matter"):
-        parent_type = self.event_handler.parent_type
-        if parent_type != self.parent_type:
-            self.parent_type = parent_type
-        
-        self.update_field_sets()
-        
-    async def load_from_api(self, parent_type="matter"):
-        parent_type = self.event_handler.parent_type
-        if parent_type != self.parent_type:
-            self.parent_type = parent_type
-            
-        response = await run.io_bound(get_custom_field_sets, self.event_handler.api_client, self.parent_type)
+        self.title.set_text(self.field_set_data.get('name', f"Field Set {self.clio_id}"))
 
-        response_list = response.get('data', [])
-        sorted_list = sorted(response_list, key=lambda x: x["name"])
+        custom_fields = self.field_set_data.get('custom_fields', [])
 
-        app.storage.general[f'{self.parent_type}_custom_field_sets'] = sorted_list
+        # Sort by display_order at creation time
+        sorted_fields = sorted(
+            custom_fields,
+            key=lambda f: self.field_data_lookup.get(str(f['id']), {}).get('display_order', float('inf'))
+        )
 
-        # app.storage.general['custom_field_sets'][parent_type] = response.get('data', [])
-        self.update_field_sets()
-        
-        if response:
-            return True
-        else:
-            return False
+        with self.card_table:
+            for index, field in enumerate(sorted_fields):
+                field_id = int(field.get('id'))
+                field_info = self.field_data_lookup.get(str(field_id), {})
+                field_name = field_info.get('name', f"Field {field_id}")
 
+                label = ui.label(field_name).classes('field-label')
 
-    def create_custom_field_set_dialog(
-        self,
-        name: str = None,
+                self.field_labels[field_id] = label
 
-    ) -> ui.dialog:
-        
+    def refresh(self):
+        """Reorder existing field labels based on updated display_order."""
+        storage = app.storage.general.get('customfield_management_storage', {})
+        field_data = storage.get('custom_field_data', {})
 
-        with ui.dialog() as create_dialog, ui.card().style('width: 500px;'):
-            ui.label('Create Custom Field').classes('w-full text-xl font-bold')
+        # Sort field IDs by new display_order
+        sorted_field_ids = sorted(
+            self.field_labels.keys(),
+            key=lambda fid: field_data.get(str(fid), {}).get('display_order', float('inf'))
+        )
 
-            name_input = ui.input('Name').classes('w-full').props('dense')
-            if name:
-                name_input.set_value(name)
+        # Move UI elements in-place
+        for index, fid in enumerate(sorted_field_ids):
+            label = self.field_labels.get(fid)
+            if label:
+                print(f"Moving Label: {label.text}")
+                label.move(target_index=index)
 
-            with ui.row().classes('justify-end'):
-                ui.button('Cancel', on_click=lambda: create_dialog.submit(None)).props('flat')
+class FieldSetContainer(ui.column):
+    def __init__(self, parent_type: str = 'matter'):
+        super().__init__()
+        self.style('width: 100%; gap: 1rem;')  # Full width with spacing between cards
+        self.parent_type = parent_type.lower()
 
-                def handle_submit():
-                    result = {
-                        'name': name_input.value
-                    }
-                    create_dialog.submit(result)
+        # self.load()
 
-                ui.button('Create', on_click=handle_submit).props('color=primary')
+    def refresh(self):
+        """Clear and reload the field set cards."""
+        self.clear()
 
-        return create_dialog
-     
-    async def show_field_set_creation_dialog(self, action_type= "post", **kwargs):
-        with self.event_handler.page_container:
-            dialog=  self.create_custom_field_set_dialog(**kwargs)
-            result = await dialog
-            
-            if action_type == "post" and result:
-                print(f"Field Set Dialog Results: {result}")
-                await self.create_field_set(**result)
+        with self:
+            self.load()
 
-    async def create_field_set(self, **kwargs):
-        response = await run.io_bound(create_custom_field_set, client=self.event_handler.api_client, parent_type=self.parent_type, **kwargs)
-        if response:
-            ui.notify(f'Field Created: {kwargs}')
-        
-class CustomFieldsContainer:
-    def __init__(self, event_handler:EventHandler=None, field_set_handler:CustomFieldSetsHandler=None, parent_type:str = None):
-        
-        self.event_handler:EventHandler = event_handler
-        self.field_set_handler:CustomFieldSetsHandler = field_set_handler
-        self.parent_type = parent_type
-        self.layout = None
-        # self.keyboard = ui.keyboard(on_key=self.handle_key)
-    
     def load(self):
-        fields:list = app.storage.client['fields']
-        
-        with ui.column().classes('w-full'):
-            with ui.column().classes('w-full').style('gap: 7px;') as self.layout:
-                for custom_field in app.storage.general.get(f'{self.parent_type}_custom_fields', []):
-                    field = CustomFieldCard(custom_field, self.event_handler, self)
-                    fields.append(field)
+        try:
+            field_set_ids = app.storage.general['customfield_management_storage'][self.parent_type.lower()]['custom_field_set_id_list']
 
-                self.event_handler.set_custom_field_cards(fields)
-    
-        self.update_fields()
-    
-    def update_field_set_handler(self, new_handler:CustomFieldSetsHandler):
-        self.field_set_handler = new_handler
-        
-    def update_fields(self) -> None:
-
-        custom_field_cards = app.storage.client['fields']
-        field_data = app.storage.general.get(f'{self.parent_type}_custom_fields', [])
-        for card in custom_field_cards:
-            new_index = card.display_order
-            card.card.move(target_index=new_index)
-            storage_index = next((i for i, d in enumerate(field_data) if d['id'] == card.id), -1)
-            app.storage.general.get(f'{self.parent_type}_custom_fields', [])[storage_index]['display_order'] = new_index
-            
-    def clear_and_refresh(self):
-        fields:list = app.storage.client['fields']
-        fields.clear()
-        self.layout.clear()
-        with self.layout:
-            for custom_field in app.storage.general.get(f'{self.parent_type}_custom_fields', []):
-                field = CustomFieldCard(custom_field, self.event_handler, self)
-                fields.append(field)
-
-            self.event_handler.set_custom_field_cards(fields)
-
-    async def load_from_storage(self):
-        parent_type = self.event_handler.parent_type
-        if parent_type != self.parent_type:
-            self.parent_type = parent_type
-            self.field_set_handler.update_parent_type(parent_type)
-
-        self.clear_and_refresh()
-        self.update_fields()
-
-        if self.field_set_handler:
-            ui.notify("Field set handler test")
-            await self.field_set_handler.load_from_storage()
-        
-        app.storage.general['parent_type'] = parent_type
-
+            for id in field_set_ids:
+                app.storage.client['field_set_cards'][id] = FieldSetCard(str(id))
+                
+        except Exception as e:
+            ui.notify(f"❌ Failed to load field sets: {e}", color='red')
+                
     async def load_from_api(self):
-        parent_type = self.event_handler.parent_type
-        if parent_type != self.parent_type:
-            self.parent_type = parent_type
-            self.field_set_handler.update_parent_type(parent_type)
-        
-        response = await run.io_bound(get_custom_fields, self.event_handler.api_client, parent_type)
-        # print(response)
+        client = app.storage.tab['custom_field_management_api']
+        response = await run.io_bound(get_custom_field_sets, client, self.parent_type)
         data = response.get('data', [])
-        data = sorted(data, key=lambda x: x['display_order'])
-        app.storage.general[f'{self.parent_type}_custom_fields'] = data
-        self.clear_and_refresh()
 
-        if self.field_set_handler:
-            ui.notify("Field set handler test")
-            await self.field_set_handler.load_from_api(parent_type=self.parent_type)
+        def transform_to_dict(data: list[dict]) -> dict[str, dict]:
+            """Convert list of dicts into a dict using 'id' (as str) as key."""
+            return {str(item['id']): {k: v for k, v in item.items() if k != 'id'} for item in data}
+
+        def split_ids_by_parent_type(data: list[dict]) -> dict[str, list[int]]:
+            from collections import defaultdict
+
+            parent_groups: dict[str, list[tuple[str, int]]] = defaultdict(list)
+            for item in data:
+                parent_type = item.get('parent_type', 'Matter')
+                name = item.get('name', '')
+                parent_groups[parent_type].append((name.lower(), item['id']))
+
+            return {
+                parent: [fid for name, fid in sorted(items)]
+                for parent, items in parent_groups.items()
+            }
+
+        def build_custom_field_map(data: list[dict]) -> dict[int, list[int]]:
+            field_map: dict[int, list[int]] = {}
+            for field_set in data:
+                field_set_id = field_set['id']
+                for cf in field_set.get('custom_fields', []):
+                    field_map.setdefault(cf['id'], []).append(field_set_id)
+            return field_map
+
+        def build_custom_field_set_map(data: list[dict]) -> dict[int, list[int]]:
+            set_map: dict[int, list[int]] = {}
+            for field_set in data:
+                field_set_id = field_set['id']
+                custom_field_ids = [cf['id'] for cf in field_set.get('custom_fields', []) if 'id' in cf]
+                set_map[field_set_id] = custom_field_ids
+            return set_map
+
+        def store_results(
+            dict_data: dict,
+            id_lists: dict[str, list[int]],
+            field_map: dict[int, list[int]],
+            field_set_map: dict[int, list[int]]
+        ) -> None:
+            storage = app.storage.general.get('customfield_management_storage')
+            storage['custom_field_set_data'] = dict_data
+            storage['custom_field_map'] = field_map
+            storage['custom_field_set_map'] = field_set_map
+            for parent_type, ids in id_lists.items():
+                section = storage.get(parent_type.lower())
+                section['custom_field_set_id_list'] = ids  # already sorted
+
+        custom_field_set_dict = transform_to_dict(data)
+        id_lists_by_type = split_ids_by_parent_type(data)
+        custom_field_map = build_custom_field_map(data)
+        custom_field_set_map = build_custom_field_set_map(data)
+
+        store_results(
+            custom_field_set_dict,
+            id_lists_by_type,
+            custom_field_map,
+            custom_field_set_map
+        )
+
+        self.refresh()
+        
+class FieldContainer(ui.column):
+
+    def __init__(self, parent_type: str = None, global_storage=None):
+        super().__init__()  # ✅ correct super call
+        self.parent_type = parent_type
+        self.classes('scroll-content')
+        app.storage.client['field_container'] = self
+        self.global_storage = global_storage
+
+    def refresh(self):
+        self.clear()
+        with self:
+            for id in self.global_storage[self.parent_type]["custom_field_id_list"]:
+                app.storage.client['fields'][id] = FieldCard(clio_id=id)
+        
+    async def load_from_api(self, api_client = None):
+        if not api_client:
+            api_client = app.storage.tab.get('custom_field_management_api')
+        
+        if not api_client:
+            ui.notify('No client started')
+            return
+
+        response = await run.io_bound(get_custom_fields, api_client, self.parent_type)
+        data = response.get('data', [])
+
+        def build_data_map(items: list[dict]) -> OrderedDict:
+            result = OrderedDict()
+            for item in items:
+                item_id = str(item['id'])  # to match your example structure
+                item_copy = item.copy()
+                del item_copy['id']
+                result[item_id] = item_copy
+            return result
+
+        def build_sorted_id_lists(items: list[dict]) -> tuple[dict[str, list[int]], bool]:
+            from collections import defaultdict
+
+            sorted_ids = defaultdict(list)
+            inconsistencies_found = False
+
+            grouped = defaultdict(list)
+            for item in items:
+                grouped[item['parent_type'].lower()].append((item['display_order'], item['id']))
+
+            for parent_type, pairs in grouped.items():
+                seen_orders = set()
+                display_orders = []
+
+                for order, item_id in pairs:
+                    if order in seen_orders:
+                        inconsistencies_found = True
+                    seen_orders.add(order)
+                    display_orders.append(order)
+
+                sorted_ids[parent_type] = [item_id for _, item_id in sorted(pairs)]
+
+                if display_orders:
+                    min_order = min(display_orders)
+                    max_order = max(display_orders)
+                    expected = set(range(min_order, max_order + 1))
+                    if expected != seen_orders:
+                        inconsistencies_found = True
+
+            return dict(sorted_ids), inconsistencies_found
+
+        storage = app.storage.general.setdefault('customfield_management_storage', {})
+
+        custom_field_id_lists, has_inconsistencies = build_sorted_id_lists(data)
+        if has_inconsistencies:
+            reload = await fix_field_display_order_dialog(parent_type=self.parent_type)
+            if reload:
+                await self.load_from_api()
+            return
+    
             
-        app.storage.general['parent_type'] = parent_type
+        for parent_type, id_list in custom_field_id_lists.items():
+            storage.setdefault(parent_type, {})['custom_field_id_list'] = id_list
+
+        custom_field_data = build_data_map(data)
+        storage['custom_field_data'] = custom_field_data
         
-        if response:
-            ui.notify("Fields loaded from API")
-            # ui.notification(message=response, multi_line=True, timeout=None, close_button=True)
-        else:
-            ui.notify("Failed to Download Fields")
+        self.refresh()
 
-    def update_position(self, item_id, new_order):
-        ui.notify(f"Moving item '{item_id}' to new display_order: {new_order}")
-        update_custom_field_display_order(self.event_handler.api_client, item_id, new_order)
-        
-        return True
+    def move_selected_cards(self, target_id: str, position: str) -> None:
 
-    def move_item(self, moving_id, target_id, position, on_display_order_change):
-        cards = app.storage.client['fields']
-        cards = sorted(cards, key=lambda x: x.display_order)
-
-        moving_item = next(card for card in cards if card.id == moving_id)
-        target_item = next(card for card in cards if card.id == target_id)
-
-        moving_order = moving_item.display_order
-        target_order = target_item.display_order
-
-        if moving_order == target_order:
-            return True
-
-        if moving_order < target_order:
-            if position == 'after':
-                new_order = target_order
-                success = on_display_order_change(moving_id, new_order)
-                if success:
-                    for card in cards:
-                        if card.id == moving_id:
-                            card.display_order = new_order
-                        elif moving_order < card.display_order <= target_order:
-                            card.display_order -= 1
-                    return True
-
-            elif position == 'before':
-                new_order = target_order - 1
-                success = on_display_order_change(moving_id, new_order)
-                if success:
-                    for card in cards:
-                        if card.id == moving_id:
-                            card.display_order = new_order
-                        elif moving_order < card.display_order < target_order:
-                            card.display_order -= 1
-                    return True
-
-        elif moving_order > target_order:
-            if position == 'after':
-                new_order = target_order + 1
-                success = on_display_order_change(moving_id, new_order)
-                if success:
-                    for card in cards:
-                        if card.id == moving_id:
-                            card.display_order = new_order
-                        elif target_order < card.display_order < moving_order:
-                            card.display_order += 1
-                    return True
-
-            elif position == 'before':
-                new_order = target_order
-                success = on_display_order_change(moving_id, new_order)
-                if success:
-                    for card in cards:
-                        if card.id == moving_id:
-                            card.display_order = new_order
-                        elif target_order <= card.display_order < moving_order:
-                            card.display_order += 1
-                    return True
-
-        return False
-
-    def bulk_move_items(self, moving_ids, target_id, position):
-        cards = app.storage.client['fields']
-
-        # Map of id to card for lookup
-        id_to_order = {card.id: card.display_order for card in cards}
-        moving_ids = sorted(moving_ids, key=lambda x: id_to_order.get(x, float('inf')))
-
-        first_move_complete = False
-        for id in moving_ids:
-            if not first_move_complete:
-                success = self.move_item(id, target_id, position, self.update_position)
-                if success:
-                    first_move_complete = True
-                    position = 'after'
-                    target_id = id
-            else:
-                success = self.move_item(id, target_id, position, self.update_position)
-                if success:
-                    target_id = id
-                    
-    def move_selected_cards(self, target_id, position):
-        cards = app.storage.client['fields']
-
-        selected_cards = [card for card in cards if card.selected]
+        selected_cards = app.storage.client.get('selected_fields', [])
         if not selected_cards:
             ui.notify("No cards selected!", color="red")
             return
+        
+        card_lookup = {card.clio_id: card for card in selected_cards}
+        moving_ids = [card.clio_id for card in selected_cards]
 
-        moving_ids = [card.id for card in selected_cards]
-        if not moving_ids:
+        # Sort selected IDs by display_order
+        field_data = app.storage.general['customfield_management_storage']['custom_field_data']
+        sorted_ids = sorted(
+            moving_ids,
+            key=lambda fid: field_data.get(fid, {}).get('display_order', float('inf'))
+        )
+
+        field_order_list: list[int] = self.global_storage.get(self.parent_type.lower(), {}) \
+            .get("custom_field_id_list", []).copy()
+
+        try:
+            target_index = field_order_list.index(int(target_id))
+        except ValueError:
+            ui.notify(f"Target ID {target_id} not found.", color="red")
             return
-        
-        self.bulk_move_items(moving_ids, target_id, position)
-        self.update_fields()
-        
-        if self.field_set_handler:
-            self.field_set_handler.update_field_sets()
-        
-        self.event_handler.deselect_all_fields()
-        
+
+        moved_so_far: list[int] = []
+
+        for i, fid in enumerate(sorted_ids):
+            fid_int = int(fid)
+
+            # Determine insert index
+            if not moved_so_far:
+                if position == "before":
+                    insert_index = max(target_index, 0)
+                elif position == "after":
+                    insert_index = target_index + 1
+                else:
+                    insert_index = target_index
+            else:
+                last_inserted = moved_so_far[-1]
+                insert_index = field_order_list.index(last_inserted) + 1
+
+            # Locate current position before mutation
+            try:
+                current_index = field_order_list.index(fid_int)
+            except ValueError:
+                ui.notify(f"Field ID {fid_int} not found in current list.", color="red")
+                continue
+
+            # Always pop before insert, regardless of direction
+            field_order_list.pop(current_index)
+            adjusted_index = insert_index - 1 if current_index < insert_index else insert_index
+            field_order_list.insert(adjusted_index, fid_int)
+
+            # Call API and move UI only if API call succeeded
+            if update_custom_field_display_order(fid_int, adjusted_index):
+                if fid in card_lookup:
+                    card_lookup[fid].move(target_index=adjusted_index)
+                moved_so_far.append(fid_int)
+            else:
+                print(f"Move for {fid} failed — reverting insert")
+                field_order_list.pop(adjusted_index)
+                field_order_list.insert(current_index, fid_int)  # revert change
+
+        # Final step: persist new order
+        self.global_storage[self.parent_type.lower()]["custom_field_id_list"] = field_order_list
+
+        # Update target_id's display_order in storage
+        try:
+            new_target_index = field_order_list.index(int(target_id))
+            target_id_str = str(target_id)
+            if target_id_str in field_data:
+                field_data[target_id_str]['display_order'] = new_target_index
+            else:
+                logging.debug(f"Target ID {target_id} not found in custom_field_data")
+        except ValueError:
+            logging.debug(f"Target ID {target_id} missing from final field_order_list")
+            
+        # Refresh all affected cards
+        affected_ids = moved_so_far + [int(target_id)]
+        refreshed_card_ids = set()
+
+        for field_id in affected_ids:
+            field_set_ids = app.storage.general['customfield_management_storage']['custom_field_map'].get(field_id, [])
+            for set_id in field_set_ids:
+                if set_id in refreshed_card_ids:
+                    continue
+                field_set_card: FieldSetCard = app.storage.client['field_set_cards'].get(set_id)
+                if field_set_card:
+                    field_set_card.refresh()
+                    refreshed_card_ids.add(set_id)
+            
     async def delete_custom_fields(self):
         names = []
         ids = []
@@ -931,143 +596,7 @@ class CustomFieldsContainer:
         
         if await confirm_dialog(message):
             for id in ids:
-                delete_custom_field(self.event_handler.api_client, id)
+                # delete_custom_field(self.event_handler.api_client, id) #Needs updating
                 ui.notify(f'Deleted: {id}')
-        else:
-            ui.notify("Cancelling deleting")
 
-    def create_custom_field_dialog(
-        self,
-        name: str = None,
-        field_type: str = None,
-        default: bool = False,
-        required: bool = False,
-        display_order: int = None,
-        picklist_options: list[dict] = None
-    ) -> ui.dialog:
-        
-        field_types = [
-            "checkbox", "contact", "currency", "date", "time", "email",
-            "matter", "numeric", "picklist", "text_area", "text_line", "url"
-        ]
-
-        if not picklist_options:
-            picklist_options: list[str] = []
-
-        with ui.dialog() as create_dialog, ui.card().style('width: 500px;'):
-            ui.label('Create Custom Field').classes('w-full text-xl font-bold')
-
-            name_input = ui.input('Name').classes('w-full').props('dense')
-            if name:
-                name_input.set_value(name)
-
-            field_type_input = ui.select(field_types, label='Field Type').classes('w-full').props('dense').style('text-transform: capitalize;')
-            if field_type in field_types:
-                field_type_input.set_value(field_type)
-
-            # === Dynamic Picklist Entry ===
-            picklist_container = ui.column().classes('w-full')
-            picklist_container.bind_visibility_from(field_type_input, 'value', value='picklist')
-
-            def add_picklist_input():
-                with ui.row().classes('w-full gap-2 items-center').style('width: 100%;') as row:
-                    input_field = ui.input(placeholder='Picklist option...') \
-                        .props('dense') \
-                        .style('flex: 1;')
-
-                    # ✅ Proper way to focus the input
-                    ui.run_javascript(f'getElement("{input_field.id}").$refs.qRef.focus()')
-
-                    add_button = ui.button('➕').props('dense')
-
-                    def handle_add():
-                        value = input_field.value.strip()
-                        if value and value not in picklist_options:
-                            picklist_options.append(value)
-                            row.clear()
-
-                            with row:
-                                ui.label(value).classes('font-bold').style('flex: 1;')
-
-                                def handle_remove():
-                                    picklist_options.remove(value)
-                                    row.delete()
-
-                                ui.button('❌', on_click=handle_remove).props('dense flat color=negative')
-
-                            add_picklist_input()
-
-                    add_button.on('click', handle_add)
-                    input_field.on('keydown.enter', lambda _: handle_add())
-
-            with picklist_container:
-                if picklist_options:
-                    for item in picklist_options:
-                        value = item.get("option", "").strip()
-                        if value:
-                            with ui.row().classes('w-full gap-2 items-center').style('width: 100%;') as row:
-                                ui.label(value).classes('font-bold').style('flex: 1;')
-
-                                def remove_closure(v=value, r=row):
-                                    def do_remove():
-                                        picklist_options[:] = [opt for opt in picklist_options if opt.get("option") != v]
-                                        r.delete()
-                                    return do_remove
-
-                                ui.button('❌', on_click=remove_closure()).props('dense flat color=negative')
-
-                add_picklist_input()  # Add the first row
-
-            # === End Picklist Section ===
-
-            display_order_input = ui.input('Display Order (optional)').classes('w-full').props('dense')
-            if display_order is not None:
-                display_order_input.set_value(str(display_order))
-
-            default_checkbox = ui.checkbox('Default').props('dense')
-            if default:
-                default_checkbox.set_value(True)
-
-            required_checkbox = ui.checkbox('Required').props('dense')
-            if required:
-                required_checkbox.set_value(True)
-
-            with ui.row().classes('justify-end'):
-                ui.button('Cancel', on_click=lambda: create_dialog.submit(None)).props('flat')
-
-                def handle_submit():
-                    result = {
-                        'name': name_input.value,
-                        'field_type': field_type_input.value,
-                        'default': default_checkbox.value,
-                        'required': required_checkbox.value,
-                        'display_order': display_order_input.value or None,
-                    }
-                    if result['field_type'] == 'picklist':
-                        result['picklist_options'] = [
-                            {'option': o['option']} if isinstance(o, dict) else {'option': o}
-                            for o in picklist_options
-                        ]
-                    # if result['field_type'] == 'picklist':
-                    #     result['picklist_options'] = picklist_options
-                    create_dialog.submit(result)
-
-                ui.button('Create', on_click=handle_submit).props('color=primary')
-
-        return create_dialog
-     
-    async def show_field_creation_dialog(self, action_type= "post", **kwargs):
-        with self.event_handler.page_container:
-            dialog=  self.create_custom_field_dialog(**kwargs)
-            result = await dialog
             
-            if action_type == "post" and result:
-                print(result)
-                await self.create_field(**result)
-
-    async def create_field(self, **kwargs):
-        response = await run.io_bound(create_custom_field, client=self.event_handler.api_client, parent_type=self.parent_type, **kwargs)
-        if response:
-            ui.notify(f'Field Created: {kwargs}')
-        # ui.notification(message=response, multi_line=True, timeout=None, close_button=True)
-        

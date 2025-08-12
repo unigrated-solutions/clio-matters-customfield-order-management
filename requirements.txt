@@ -1,7 +1,7 @@
-PyGObject==3.50.0
-nicegui
+# PyGObject==3.50.0
+nicegui==2.22.1
 typing-inspect
 httpx
 pywebview
 pandas
-clio-manage-api-client
+clio-manage-api-client==-0.1.1
